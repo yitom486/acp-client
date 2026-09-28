@@ -19,8 +19,20 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Yitom <yitom486@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yitom486/acp-client.git"
+  },
+  "homepage": "https://github.com/yitom486/acp-client#readme",
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && tsc -p tsconfig.json"
+    "build": "bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && tsc -p tsconfig.json",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.0.0"

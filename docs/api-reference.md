@@ -75,7 +75,8 @@ export interface AcpClientCallbacks {
     sessionId?: string
     toolCall?: { id?: string; title?: string; kind?: string }
     params: Record<string, unknown>
-  }) => Promise<{ outcome: 'approved' | 'cancelled' }>
+  }) => Promise<{ outcome: 'selected'; optionId: string } | { outcome: 'cancelled' }>
+  // 允许放行统一用 pickAllowOptionId(params) 挑 Agent 给定的允许项（协议层无 'approved'）
 
   /** 会话状态与内容流式更新 */
   onSessionUpdate?: (params: Record<string, unknown>) => void

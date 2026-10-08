@@ -87,7 +87,7 @@ export class AcpSessionHandle {
   ) {}
 
   /** 向当前会话发送 Prompt / 消息交互 */
-  async prompt(promptText: string, options?: { timeoutMs?: number }): Promise<Result<unknown, AppError>> {
+  async prompt(promptText: string, options?: { timeoutMs?: number; images?: Array<{ mimeType: string; data: string }> }): Promise<Result<unknown, AppError>> {
     return this.client.promptSession(this.sessionId, promptText, options)
   }
 
@@ -111,6 +111,7 @@ export class AcpClient {
   private readonly workspaceRoot: string
   private readonly clientInfo: { name: string; version: string }
   private readonly dataDir: string
+  private readonly extraEnv: NodeJS.ProcessEnv
   private readonly callbacks: AcpClientCallbacks
   private readonly terminals = new AcpTerminalManager()
 
@@ -124,9 +125,10 @@ export class AcpClient {
     this.workspaceRoot = options.workspaceRoot
     this.clientInfo = {
       name: options.clientInfo?.name ?? 'inkdown',
-      version: options.clientInfo?.version ?? '0.1.0',
+      version: options.clientInfo?.version ?? '0.1.1',
     }
     this.dataDir = options.dataDir ?? getDefaultAgentDataDir()
+    this.extraEnv = options.env ?? {}
     this.callbacks = options.callbacks ?? {}
 
     const runtimeId =
@@ -195,7 +197,13 @@ export class AcpClient {
       // 3. 代理与环境变量合成
       const storedProxy = await readAcpProxySettings(this.dataDir)
       const proxyEnv = buildAcpProxySpawnEnv(storedProxy)
-      const spawnEnv = this.adapter.getSpawnEnv?.(storedProxy) ?? proxyEnv
+      const baseEnv = this.adapter.getSpawnEnv?.(storedProxy) ?? proxyEnv
+      // 调用方附加环境（如自定义供应商 CODEX_HOME/KEY）显式优先于代理合成；
+      // 无附加时行为与旧版完全一致。
+      const spawnEnv = {
+        ...baseEnv,
+        env: { ...(baseEnv.env ?? {}), ...(this.extraEnv ?? {}) },
+      }
 
       // 4. 冷启动/生命周期钩子
       await this.adapter.beforeSpawn?.()
@@ -336,19 +344,24 @@ export class AcpClient {
   async promptSession(
     sessionId: string,
     promptText: string,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; images?: Array<{ mimeType: string; data: string }> },
   ): Promise<Result<unknown, AppError>> {
     if (!this.sdkConnection?.agent) {
       return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })
     }
 
     try {
+      const prompt: Array<Record<string, unknown>> = [{ type: 'text', text: promptText }]
+      for (const image of options?.images ?? []) {
+        if (!image?.data || !image?.mimeType) continue
+        prompt.push({ type: 'image', mimeType: image.mimeType, data: image.data })
+      }
       const response = await sdkRequest(
         this.sdkConnection.agent,
         methods.agent.session.prompt,
         {
           sessionId,
-          prompt: [{ type: 'text', text: promptText }],
+          prompt,
         },
         options?.timeoutMs,
       )

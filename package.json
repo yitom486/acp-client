@@ -1,6 +1,6 @@
 {
   "name": "@yitom/acp-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Headless ACP (Agent Client Protocol) SDK for connecting to Codex, Claude, Cursor, DeepSeek and more",
   "type": "module",
   "main": "./dist/index.cjs",

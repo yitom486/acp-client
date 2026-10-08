@@ -5,7 +5,7 @@
  * 运行方式：
  *   bun run packages/acp/examples/standalone-acp-demo.ts
  */
-import { AcpClient, getAcpRuntimeAdapter, BUILTIN_ACP_RUNTIMES } from '../src'
+import { AcpClient, getAcpRuntimeAdapter, BUILTIN_ACP_RUNTIMES, pickAllowOptionId } from '../src'
 
 async function main() {
   console.log('=== 支持的 ACP 运行时列表 ===')
@@ -28,10 +28,13 @@ async function main() {
       onStatusChange: (status, detail) => {
         console.log(`[Status Change] -> ${status} ${detail ? `(${detail})` : ''}`)
       },
-      onPermissionRequest: async ({ toolCall }) => {
+      onPermissionRequest: async ({ toolCall, params }) => {
         console.log(`[Permission Request] Agent 请求调用工具:`, toolCall)
-        // 允许自动授权或通过 readline 让用户按 y/n
-        return { outcome: 'approved' }
+        // 允许自动授权：用 pickAllowOptionId 挑允许项（协议层无 'approved'）
+        const optionId = pickAllowOptionId(params as Record<string, unknown>)
+        return optionId
+          ? { outcome: 'selected' as const, optionId }
+          : { outcome: 'cancelled' as const }
       },
       onSessionUpdate: (update) => {
         console.log(`[Stream Event]:`, update)

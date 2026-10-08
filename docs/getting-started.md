@@ -25,7 +25,7 @@ npm install @inkdown/acp
 ```typescript
 import readline from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
-import { AcpClient } from '@inkdown/acp'
+import { AcpClient, pickAllowOptionId } from '@yitom/acp-client'
 
 async function runCli() {
   const rl = readline.createInterface({ input: stdin, output: stdout })
@@ -41,13 +41,16 @@ async function runCli() {
       onStatusChange: (status, detail) => {
         console.log(`[连接状态] ${status} ${detail ? `(${detail})` : ''}`)
       },
-      // 敏感权限交互式审批
-      onPermissionRequest: async ({ toolCall }) => {
+      // 敏感权限交互式审批（协议层只有 selected/cancelled，用 pickAllowOptionId 挑允许项）
+      onPermissionRequest: async ({ toolCall, params }) => {
         const answer = await rl.question(
           `\n[权限确认] Agent 请求执行工具 "${toolCall?.title || '未知'}"，是否允许？(y/N): `
         )
-        const approved = answer.trim().toLowerCase() === 'y'
-        return { outcome: approved ? 'approved' : 'cancelled' }
+        if (answer.trim().toLowerCase() !== 'y') return { outcome: 'cancelled' as const }
+        const optionId = pickAllowOptionId(params as Record<string, unknown>)
+        return optionId
+          ? { outcome: 'selected' as const, optionId }
+          : { outcome: 'cancelled' as const }
       },
       // 实时流式响应
       onSessionUpdate: (update) => {

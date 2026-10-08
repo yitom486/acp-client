@@ -64,9 +64,13 @@ const client = new AcpClient({
     onStatusChange: (status, detail) => {
       console.log(`[Status] -> ${status}`, detail ?? '')
     },
-    onPermissionRequest: async ({ toolCall }) => {
+    onPermissionRequest: async ({ toolCall, params }) => {
       console.log(`Agent 请求调用工具:`, toolCall)
-      return { outcome: 'approved' } // 交互式批准或自动放行
+      // 交互式批准（y）或自动放行：协议层只有 selected/cancelled，
+      // 允许项用 pickAllowOptionId 从 Agent 给的 options 里挑（无 'approved'）。
+      return pickAllowOptionId(params)
+        ? { outcome: 'selected' as const, optionId: pickAllowOptionId(params)! }
+        : { outcome: 'cancelled' as const }
     },
     onSessionUpdate: (event) => {
       console.log(`[Stream Event]:`, event)

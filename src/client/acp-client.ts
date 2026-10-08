@@ -162,6 +162,10 @@ export class AcpClient {
     return this.sdkConnection?.agent ?? null
   }
 
+  get initializeResponse(): InitializeResponse | null {
+    return this.initResponse
+  }
+
   /**
    * 启动并连接 Agent：
    * 1. 预检判停（如缺少 API Key、未安装 CLI）；

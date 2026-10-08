@@ -1,6 +1,6 @@
 {
   "name": "@yitom/acp-client",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Headless ACP (Agent Client Protocol) SDK for connecting to Codex, Claude, Cursor, DeepSeek and more",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -17,6 +17,7 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
+    "./sidecar": "./dist/sidecar.cjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -30,7 +31,7 @@
   },
   "homepage": "https://github.com/yitom486/acp-client#readme",
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && tsc -p tsconfig.json",
+    "build": "bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && bun build ./src/sidecar/main.ts --outfile ./dist/sidecar.cjs --format cjs --target node && tsc -p tsconfig.json",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },
@@ -40,5 +41,8 @@
   "devDependencies": {
     "@types/node": "^26.6.3",
     "typescript": "^7.0.2"
+  },
+  "bin": {
+    "acp-engine": "./dist/sidecar.cjs"
   }
 }

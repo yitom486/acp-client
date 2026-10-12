@@ -1,3 +1,4 @@
+import { AvailableCommandsCache, type AcpAvailableCommand } from '../session/available-commands'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import {
   methods,
@@ -91,6 +92,11 @@ export class AcpSessionHandle {
     return this.client.promptSession(this.sessionId, promptText, options)
   }
 
+  /** Agent 通过 available_commands_update 提供的斜杠命令（调用 = prompt 发送 `/name args` 文本） */
+  get availableCommands(): AcpAvailableCommand[] | undefined {
+    return this.client.getAvailableCommands(this.sessionId)
+  }
+
   /** 修改会话配置项（如模型 ID、模式等） */
   async setConfigOption(configId: string, value: string | boolean): Promise<Result<unknown, AppError>> {
     return this.client.setSessionConfigOption(this.sessionId, configId, value)
@@ -106,6 +112,7 @@ export class AcpSessionHandle {
  */
 export class AcpClient {
   private status: AcpConnectionStatus = 'disconnected'
+  private readonly commandsCache = new AvailableCommandsCache()
   private runtimeInfo: AcpRuntimeInfo
   private adapter: AcpRuntimeAdapter
   private readonly workspaceRoot: string
@@ -252,6 +259,10 @@ export class AcpClient {
           return { outcome: 'cancelled' }
         },
         onSessionUpdate: (params) => {
+          // Cache before forwarding so the list is readable even if the host
+          // has not learned this sessionId yet (commands usually arrive right
+          // after session/new|load|resume returns).
+          this.commandsCache.observe(params)
           this.callbacks.onSessionUpdate?.(params)
         },
       }
@@ -294,6 +305,16 @@ export class AcpClient {
       await this.disconnect(message)
       return err({ code: 'ACP_PROTOCOL_ERROR', message })
     }
+  }
+
+  /** 最近一次 available_commands_update 的命令列表（未收到过则为 undefined） */
+  getAvailableCommands(sessionId: string): AcpAvailableCommand[] | undefined {
+    return this.commandsCache.get(sessionId)
+  }
+
+  /** 等待某会话的命令列表（已缓存则立即返回；超时返回 undefined） */
+  waitForAvailableCommands(sessionId: string, timeoutMs = 150): Promise<AcpAvailableCommand[] | undefined> {
+    return this.commandsCache.wait(sessionId, timeoutMs)
   }
 
   /** 创建或恢复会话 */

@@ -99,6 +99,20 @@ await client.disconnect()
 
 ---
 
+## ⌨️ 斜杠命令（available_commands_update）
+
+Agent 推送的 `available_commands_update` 会原样经 `onSessionUpdate` 透传，同时按会话缓存最新列表（含 `name` / `description` / `input.hint`），
+即使宿主还没拿到 sessionId 也不会丢：
+
+```ts
+const handle = (await client.createSession()).value
+const cmds = handle.availableCommands ?? (await client.waitForAvailableCommands(handle.sessionId, 500))
+// 调用命令 = 普通文本 prompt（ACP 规范）
+await handle.prompt(formatCommandPrompt('review', 'main')) // "/review main"
+```
+
+Sidecar：`session/open` 结果带 `availableCommands`（若已收到），并新增 `session/commands` 查询方法。
+
 ## 📦 打包构建
 
 在本包根目录一键构建生成 `dist`（ESM / CJS / `.d.ts`）：

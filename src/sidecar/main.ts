@@ -253,9 +253,11 @@ async function handleRpcRequest(id: string | number, method: string, params: any
         const handle = sessionResult.value
         activeSessions.set(handle.sessionId, handle)
 
+        const availableCommands = await client.waitForAvailableCommands(handle.sessionId, 150)
         sendResponse(id, {
           sessionId: handle.sessionId,
           restoreMethod: handle.restoreMethod,
+          ...(availableCommands ? { availableCommands } : {}),
           configOptions: handle.configOptions,
           modelOptions: extractModelOptions(handle.configOptions),
         })
@@ -383,6 +385,17 @@ async function handleRpcRequest(id: string | number, method: string, params: any
       } catch (err: any) {
         sendError(id, -32000, err?.message ?? String(err))
       }
+      break
+    }
+
+    case 'session/commands': {
+      // Latest available_commands_update for a session (null = none received yet).
+      const { sessionId } = params ?? {}
+      if (!client) {
+        sendError(id, -32002, 'Client not connected')
+        return
+      }
+      sendResponse(id, { sessionId, availableCommands: client.getAvailableCommands(String(sessionId ?? '')) ?? null })
       break
     }
 

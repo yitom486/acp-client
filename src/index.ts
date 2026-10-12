@@ -42,6 +42,7 @@ export * from "./auth/connect-auth-gate";
 export * from "./session/agent-registry";
 export * from "./session/config-options";
 export * from "./session/session-capabilities";
+export * from "./session/available-commands";
 
 // ── MCP ──
 export * from "./mcp/inkdown-mcp-tools";

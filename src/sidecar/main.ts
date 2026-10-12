@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as readline from 'node:readline'
+import { ACP_CLIENT_VERSION } from '../version'
 import {
   AcpClient,
   AcpSessionHandle,
@@ -481,7 +482,7 @@ function startSidecar() {
   })
 
   sendNotification('ready', {
-    version: '0.1.2',
+    version: ACP_CLIENT_VERSION,
     platform: process.platform,
     pid: process.pid,
   })

@@ -13,6 +13,7 @@
 
 // ── 核心常量与共享契约重导出 ──
 export * from "./contracts";
+export { ACP_CLIENT_VERSION } from "./version";
 
 // ── 核心客户端与会话 ──
 export * from "./client/acp-client";

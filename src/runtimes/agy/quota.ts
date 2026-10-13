@@ -29,6 +29,7 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
     runtimeId: 'agy',
     provider: 'Google Antigravity',
     account: {
+      name: process.env.GOOGLE_ACCOUNT || process.env.USERNAME || 'Google Developer',
       plan: 'Antigravity / Gemini',
       type: 'gemini',
     },

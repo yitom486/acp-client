@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import * as os from 'node:os'
@@ -8,10 +8,6 @@ export function resolveGeminiHome(): string {
   const home = process.env.USERPROFILE || process.env.HOME || ''
   return join(home, '.gemini')
 }
-
-const isWSL =
-  process.platform === 'linux' &&
-  (os.release().toLowerCase().includes('microsoft') || Boolean(process.env.WSL_DISTRO_NAME))
 
 export function resolveAntigravityAccount(): { email?: string; name?: string } {
   if (process.env.GOOGLE_ACCOUNT?.trim()) {
@@ -25,21 +21,11 @@ export function resolveAntigravityAccount(): { email?: string; name?: string } {
   const home = process.env.USERPROFILE || process.env.HOME || os.homedir() || ''
   const candidates: string[] = [
     process.env.APPDATA ? join(process.env.APPDATA, 'Antigravity', 'app_storage.json') : null,
+    // Linux (including WSL) ~/.config
     join(home, '.config', 'Antigravity', 'app_storage.json'),
+    // macOS Library
     join(home, 'Library', 'Application Support', 'Antigravity', 'app_storage.json'),
   ].filter(Boolean) as string[]
-
-  if (isWSL) {
-    try {
-      const usersDir = '/mnt/c/Users'
-      if (existsSync(usersDir)) {
-        for (const u of readdirSync(usersDir)) {
-          if (u === 'Public' || u === 'Default' || u.startsWith('.')) continue
-          candidates.push(join(usersDir, u, 'AppData', 'Roaming', 'Antigravity', 'app_storage.json'))
-        }
-      }
-    } catch {}
-  }
 
   for (const file of candidates) {
     try {
@@ -64,10 +50,54 @@ export function resolveAntigravityAccount(): { email?: string; name?: string } {
   return {}
 }
 
-export async function probeAgyQuota(options?: { sessionId?: string }): Promise<AcpAgentQuota | null> {
-  const acc = resolveAntigravityAccount()
-  let lsInfo: { port: number; csrfToken: string } | null = null
+export function resolveAntigravityLanguageServer(): { port: number; csrfToken: string } | null {
+  const home = process.env.USERPROFILE || process.env.HOME || os.homedir() || ''
+  const appData = process.env.APPDATA || (process.platform === 'win32' ? join(home, 'AppData', 'Roaming') : '')
 
+  const baseDirs: string[] = [
+    appData ? join(appData, 'Antigravity IDE', 'logs') : null,
+    appData ? join(appData, 'Antigravity', 'logs') : null,
+    // Linux (including WSL) ~/.config
+    join(home, '.config', 'Antigravity IDE', 'logs'),
+    join(home, '.config', 'Antigravity', 'logs'),
+    // macOS Library
+    join(home, 'Library', 'Application Support', 'Antigravity IDE', 'logs'),
+    join(home, 'Library', 'Application Support', 'Antigravity', 'logs'),
+  ].filter(Boolean) as string[]
+
+  // 1. 优先从最新的 ls-main.log 文件中直接解析端口与 CSRF Token（0ms 级、无子进程开销、最可靠）
+  for (const base of baseDirs) {
+    try {
+      if (!existsSync(base)) continue
+      const sessionDirs = readdirSync(base)
+        .map((d) => {
+          try {
+            return { name: d, time: statSync(join(base, d)).mtimeMs }
+          } catch {
+            return null
+          }
+        })
+        .filter((d): d is { name: string; time: number } => Boolean(d))
+        .sort((a, b) => b.time - a.time)
+
+      for (const s of sessionDirs) {
+        const logFile = join(base, s.name, 'ls-main.log')
+        if (existsSync(logFile)) {
+          const content = readFileSync(logFile, 'utf8')
+          const csrfMatch = content.match(/--csrf_token\s+([a-f0-9\-]+)/)
+          const portMatch = content.match(/LS started on port\s+(\d+)/) || content.match(/--https_server_port\s+(\d+)/)
+          if (csrfMatch && portMatch) {
+            return {
+              port: parseInt(portMatch[1], 10),
+              csrfToken: csrfMatch[1],
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 2. 备用策略：仅当日志未找到时，执行平台原生进程命令行检测（避免无过滤扫描全局进程引发 ETIMEDOUT）
   try {
     let out = ''
     if (process.platform === 'win32') {
@@ -76,19 +106,9 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
         [
           '-NoProfile',
           '-Command',
-          'Get-CimInstance Win32_Process | Where-Object { $_.Name -like "*language_server*" } | Select-Object -ExpandProperty CommandLine',
+          "Get-CimInstance Win32_Process -Filter \"Name like '%language_server%'\" | Select-Object -ExpandProperty CommandLine",
         ],
         { encoding: 'utf8', timeout: 4000, windowsHide: true }
-      )
-    } else if (isWSL) {
-      out = execFileSync(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          'Get-CimInstance Win32_Process | Where-Object { $_.Name -like "*language_server*" } | Select-Object -ExpandProperty CommandLine',
-        ],
-        { encoding: 'utf8', timeout: 4000 }
       )
     } else {
       out = execFileSync('ps', ['aux'], { encoding: 'utf8', timeout: 4000 })
@@ -98,60 +118,67 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
       const portMatch = l.match(/--https_server_port\s+(\d+)/)
       const csrfMatch = l.match(/--csrf_token\s+([a-f0-9\-]+)/)
       if (portMatch && csrfMatch) {
-        lsInfo = { port: parseInt(portMatch[1], 10), csrfToken: csrfMatch[1] }
-        break
+        return { port: parseInt(portMatch[1], 10), csrfToken: csrfMatch[1] }
       }
     }
   } catch {}
 
+  return null
+}
+
+export async function probeAgyQuota(options?: { sessionId?: string }): Promise<AcpAgentQuota | null> {
+  const acc = resolveAntigravityAccount()
+  const lsInfo = resolveAntigravityLanguageServer()
+
   if (lsInfo) {
     try {
       let data: any = null
-      if (isWSL) {
-        const raw = execFileSync(
-          'curl.exe',
-          [
-            '-k',
-            '-s',
-            '-X',
-            'POST',
-            '-H',
-            'Content-Type: application/json',
-            '-H',
-            `x-codeium-csrf-token: ${lsInfo.csrfToken}`,
-            '-d',
-            '{}',
-            `https://127.0.0.1:${lsInfo.port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`,
-          ],
-          { encoding: 'utf8', timeout: 4000 }
+      const prevReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+      try {
+        const res = await fetch(
+          `https://127.0.0.1:${lsInfo.port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-codeium-csrf-token': lsInfo.csrfToken,
+            },
+            body: JSON.stringify({}),
+            signal: AbortSignal.timeout(4000),
+            tls: { rejectUnauthorized: false },
+          } as any
         )
-        data = JSON.parse(raw)
-      } else {
-        const prevReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+        if (res.ok) {
+          data = await res.json()
+        }
+      } catch {
+        // Native fetch fallback to curl on platforms where Node/Bun TLS behaves differently
         try {
-          const res = await fetch(
-            `https://127.0.0.1:${lsInfo.port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-codeium-csrf-token': lsInfo.csrfToken,
-              },
-              body: JSON.stringify({}),
-              signal: AbortSignal.timeout(4000),
-              tls: { rejectUnauthorized: false },
-            } as any
+          const raw = execFileSync(
+            process.platform === 'win32' ? 'curl.exe' : 'curl',
+            [
+              '-k',
+              '-s',
+              '-X',
+              'POST',
+              '-H',
+              'Content-Type: application/json',
+              '-H',
+              `x-codeium-csrf-token: ${lsInfo.csrfToken}`,
+              '-d',
+              '{}',
+              `https://127.0.0.1:${lsInfo.port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`,
+            ],
+            { encoding: 'utf8', timeout: 4000 }
           )
-          if (res.ok) {
-            data = await res.json()
-          }
-        } finally {
-          if (prevReject !== undefined) {
-            process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevReject
-          } else {
-            delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
-          }
+          data = JSON.parse(raw)
+        } catch {}
+      } finally {
+        if (prevReject !== undefined) {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevReject
+        } else {
+          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
         }
       }
 
@@ -256,7 +283,7 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
     } catch {}
   }
 
-  // 回落逻辑
+  // 兜底逻辑
   const geminiHome = resolveGeminiHome()
   const hasAgyDir = existsSync(join(geminiHome, 'antigravity')) || existsSync(join(geminiHome, 'antigravity-cli'))
   const hasApiKey = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)

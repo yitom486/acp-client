@@ -1,4 +1,4 @@
-import type { AcpAuthMethod, AcpProxySettings, CodexAuthPreflight } from "../contracts"
+import type { AcpAuthMethod, AcpProxySettings, CodexAuthPreflight, AcpAgentQuota } from "../contracts"
 import { DEFAULT_ACP_RUNTIME_ID } from "../contracts"
 import { codexAdapter } from './codex'
 import { emptyAcpAuthPreflight } from './codex/codex-auth-preflight'
@@ -6,6 +6,7 @@ import { claudeAdapter } from './claude'
 import { geminiAdapter } from './gemini'
 import { copilotAdapter } from './copilot'
 import { opencodeAdapter } from './opencode'
+import { opencodeV2Adapter } from './opencode-v2'
 import { cursorAdapter } from './cursor'
 import { deepseekAdapter } from './deepseek'
 import { agyAdapter } from './agy'
@@ -15,6 +16,7 @@ export * from './claude'
 export * from './gemini'
 export * from './copilot'
 export * from './opencode'
+export * from './opencode-v2'
 export * from './cursor'
 export * from './deepseek'
 export * from './agy'
@@ -25,6 +27,8 @@ export interface GenericRuntimeAdapter {
   /** 仅冷启动（无温进程可用、即将 spawn）时调用一次；各 runtime 自理副作用 */
   onColdStart?: () => Promise<void>
   probeAuth: () => CodexAuthPreflight
+  /** 运行时配额探针（5h 限制、周额度、余额），与会话生命周期解耦 */
+  probeQuota?: (options?: { sessionId?: string }) => Promise<AcpAgentQuota | null>
   /**
    * 预 spawn 接线点（冷启动 spawn 前调用一次）：
    * 返回 `{ command, args }` 则覆盖模板的 spawn 目标（可透传绝对路径）；
@@ -74,6 +78,8 @@ export function getAcpRuntimeAdapter(runtimeId: string): AcpRuntimeAdapter {
       return copilotAdapter
     case opencodeAdapter.id:
       return opencodeAdapter
+    case opencodeV2Adapter.id:
+      return opencodeV2Adapter
     case cursorAdapter.id:
     case 'cursor':
       // 目录名别名：模板 id 以 `cursor-cli` 为准（见 acp-client 注释与 contracts 模板）

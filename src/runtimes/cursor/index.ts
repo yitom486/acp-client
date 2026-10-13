@@ -1,8 +1,10 @@
+export * from './quota'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
-import type { AcpAuthMethod, CodexAuthPreflight } from "../../contracts"
+import type { AcpAuthMethod, CodexAuthPreflight, AcpAgentQuota } from "../../contracts"
+import { probeCursorQuota } from './quota'
 import type { GenericRuntimeAdapter } from '../index'
 
 /**
@@ -253,6 +255,7 @@ export function probeCursorAuth(overrides?: CursorPathOverrides): CodexAuthPrefl
 export const cursorAdapter: GenericRuntimeAdapter = {
   id: 'cursor-cli',
   probeAuth: () => probeCursorAuth(),
+  probeQuota: async () => probeCursorQuota(),
   resolveSpawnCommand: () => resolveCursorSpawnCommand(),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,
   canSkipInteractiveAuth: () => false,

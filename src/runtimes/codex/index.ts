@@ -1,6 +1,9 @@
+export * from './quota'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { CodexAuthPreflight } from "../../contracts"
+import type { CodexAuthPreflight, AcpAgentQuota } from "../../contracts"
+import type { GenericRuntimeAdapter } from '../index'
+import { probeCodexQuota } from './quota'
 import {
   buildCustomProviderConfigToml,
   buildCustomProviderSpawnEnv,
@@ -34,7 +37,8 @@ export async function provisionCustomProviderCodexHome(
   }
 }
 
-export interface CodexRuntimeAdapter {
+export interface CodexRuntimeAdapter extends GenericRuntimeAdapter {
+  probeQuota?: (options?: { sessionId?: string }) => Promise<AcpAgentQuota | null>
   id: 'codex-acp'
   probeAuth: () => CodexAuthPreflight
   getCustomProvider: () => Promise<{
@@ -46,6 +50,7 @@ export interface CodexRuntimeAdapter {
 
 export const codexAdapter: CodexRuntimeAdapter = {
   id: 'codex-acp',
+  probeQuota: async (options?: { sessionId?: string }) => probeCodexQuota(options),
   probeAuth: () => {
     return probeCodexAuth()
   },

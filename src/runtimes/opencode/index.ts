@@ -1,7 +1,9 @@
+export * from './quota'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { AcpAuthMethod, CodexAuthPreflight } from "../../contracts"
+import type { AcpAuthMethod, CodexAuthPreflight, AcpAgentQuota } from "../../contracts"
+import { probeOpencodeQuota } from './quota'
 import type { GenericRuntimeAdapter } from '../index'
 
 /**
@@ -114,6 +116,7 @@ export function probeOpencodeAuth(overrides?: OpencodePathOverrides): CodexAuthP
 export const opencodeAdapter: GenericRuntimeAdapter = {
   id: 'opencode',
   probeAuth: () => probeOpencodeAuth(),
+  probeQuota: async () => probeOpencodeQuota(),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,
   canSkipInteractiveAuth: () => false,
   // v2 已迁 SQLite，文件探针同样会漏检，未命中时由 gate 直连试一次兜底

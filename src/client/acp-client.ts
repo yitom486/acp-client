@@ -1,4 +1,6 @@
 import { AvailableCommandsCache, type AcpAvailableCommand } from '../session/available-commands'
+import { QuotaCache } from '../session/quota'
+import type { AcpAgentQuota } from '../contracts'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import {
   methods,
@@ -93,6 +95,16 @@ export class AcpSessionHandle {
   }
 
   /** Agent 通过 available_commands_update 提供的斜杠命令（调用 = prompt 发送 `/name args` 文本） */
+  /** 当前会话最近获取或解析到的配额（5h / 周额度 / 余额） */
+  get quota(): AcpAgentQuota | undefined {
+    return this.client.getCachedQuota(this.sessionId)
+  }
+
+  /** 主动获取/刷新配额（优先缓存，过期或无缓存时触发适配器探针） */
+  async getQuota(): Promise<AcpAgentQuota | null> {
+    return this.client.getQuota(this.sessionId)
+  }
+
   get availableCommands(): AcpAvailableCommand[] | undefined {
     return this.client.getAvailableCommands(this.sessionId)
   }
@@ -113,6 +125,7 @@ export class AcpSessionHandle {
 export class AcpClient {
   private status: AcpConnectionStatus = 'disconnected'
   private readonly commandsCache = new AvailableCommandsCache()
+  private readonly quotaCache = new QuotaCache()
   private runtimeInfo: AcpRuntimeInfo
   private adapter: AcpRuntimeAdapter
   private readonly workspaceRoot: string
@@ -263,6 +276,7 @@ export class AcpClient {
           // has not learned this sessionId yet (commands usually arrive right
           // after session/new|load|resume returns).
           this.commandsCache.observe(params)
+          this.quotaCache.observe(params, this.runtimeInfo.id)
           this.callbacks.onSessionUpdate?.(params)
         },
       }
@@ -308,6 +322,25 @@ export class AcpClient {
   }
 
   /** 最近一次 available_commands_update 的命令列表（未收到过则为 undefined） */
+  getCachedQuota(sessionId?: string): AcpAgentQuota | undefined {
+    return this.quotaCache.get(sessionId, this.runtimeInfo.id)
+  }
+
+  async getQuota(sessionId?: string): Promise<AcpAgentQuota | null> {
+    const cached = this.getCachedQuota(sessionId)
+    if (cached && Date.now() - cached.updatedAt < 30_000) {
+      return cached
+    }
+    if (this.adapter.probeQuota) {
+      const probed = await this.adapter.probeQuota({ sessionId })
+      if (probed) {
+        this.quotaCache.set(probed, sessionId)
+        return probed
+      }
+    }
+    return cached ?? null
+  }
+
   getAvailableCommands(sessionId: string): AcpAvailableCommand[] | undefined {
     return this.commandsCache.get(sessionId)
   }

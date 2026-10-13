@@ -29,6 +29,7 @@ describe('runtimes/index', () => {
       { id: 'gemini', authMethodsPassthrough: true },
       { id: 'copilot', authMethodsPassthrough: true },
       { id: 'opencode', authMethodsPassthrough: true },
+      { id: 'opencode-v2', authMethodsPassthrough: true },
       { id: 'cursor-cli', authMethodsPassthrough: true },
       { id: 'deepseek', authMethodsPassthrough: true },
       { id: 'agy', authMethodsPassthrough: true },

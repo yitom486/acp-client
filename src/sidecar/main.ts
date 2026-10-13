@@ -389,6 +389,21 @@ async function handleRpcRequest(id: string | number, method: string, params: any
       break
     }
 
+    case 'session/quota': {
+      const { sessionId } = params ?? {}
+      if (!client) {
+        sendError(id, -32002, 'Client not connected')
+        return
+      }
+      try {
+        const quota = await client.getQuota(sessionId ? String(sessionId) : undefined)
+        sendResponse(id, { sessionId, quota })
+      } catch (err) {
+        sendError(id, -32000, err instanceof Error ? err.message : String(err))
+      }
+      break
+    }
+
     case 'session/commands': {
       // Latest available_commands_update for a session (null = none received yet).
       const { sessionId } = params ?? {}

@@ -443,6 +443,7 @@ export const CODEX_ACP_NPM_PACKAGE = '@agentclientprotocol/codex-acp' as const
 export const CLAUDE_ACP_NPM_PACKAGE = '@agentclientprotocol/claude-agent-acp' as const
 export const DEEPSEEK_DSH_NPM_PACKAGE = '@deepseek-ai/dsh' as const
 export const AGY_ACP_NPM_PACKAGE = '@yitom/agy-acp-map' as const
+export const OPENCODE_CLI_NPM_PACKAGE = '@opencode/cli' as const
 export const LEGACY_ZED_CODEX_ACP_NPM_PACKAGE = '@zed-industries/codex-acp' as const
 export const DEFAULT_ACP_RUNTIME_ID = 'codex-acp'
 
@@ -506,6 +507,17 @@ export const BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[] = [
     requiredEnvKeys: [],
   },
   {
+    id: 'opencode-v2',
+    name: 'OpenCode v2',
+    description:
+      '通过 npx 启动独立产品线 @opencode/cli v2（acp）；与 1.x 共存，复用 v2 SQLite 登录态',
+    authHint:
+      'v2 登录态在 SQLite（auth.json 仅兼容残留）；未登录先用 v2 二进制跑 opencode auth login',
+    command: 'npx',
+    args: ['-y', OPENCODE_CLI_NPM_PACKAGE, 'acp'],
+    requiredEnvKeys: [],
+  },
+  {
     id: 'cursor-cli',
     name: 'Cursor',
     description:
@@ -542,3 +554,5 @@ export const BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[] = [
 export function findBuiltinAcpRuntime(id: string): AcpRuntimeInfo | undefined {
   return BUILTIN_ACP_RUNTIMES.find((item) => item.id === id)
 }
+
+export * from './quota'

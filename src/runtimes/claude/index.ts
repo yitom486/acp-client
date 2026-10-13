@@ -1,7 +1,9 @@
+export * from './quota'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { AcpAuthMethod, CodexAuthPreflight } from "../../contracts"
+import type { AcpAuthMethod, CodexAuthPreflight, AcpAgentQuota } from "../../contracts"
+import { probeClaudeQuota } from './quota'
 import type { GenericRuntimeAdapter } from '../index'
 
 /**
@@ -40,6 +42,7 @@ export function probeClaudeAuth(): CodexAuthPreflight {
 export const claudeAdapter: GenericRuntimeAdapter = {
   id: 'claude',
   probeAuth: () => probeClaudeAuth(),
+  probeQuota: async (options) => probeClaudeQuota(options),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,
   canSkipInteractiveAuth: () => false,
 }

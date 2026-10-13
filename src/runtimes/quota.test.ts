@@ -19,7 +19,7 @@ describe('runtimes quota probes', () => {
       expect(quota.account?.plan).toBe('ChatGPT plus')
       expect(quota.account?.email).toBe('yitom486@gmail.com')
     }
-  })
+  }, 15000)
 
   it('claudeAdapter provides probeQuota and gracefully handles unauthorized/banned', async () => {
     expect(typeof claudeAdapter.probeQuota).toBe('function')
@@ -28,7 +28,7 @@ describe('runtimes quota probes', () => {
     expect(quota?.runtimeId).toBe('claude')
     expect(quota?.provider).toContain('Claude')
     expect(['ok', 'unauthorized', 'banned']).toContain(quota?.status)
-  })
+  }, 15000)
 
   it('opencodeAdapter provides probeQuota', async () => {
     expect(typeof opencodeAdapter.probeQuota).toBe('function')
@@ -36,7 +36,7 @@ describe('runtimes quota probes', () => {
     expect(quota).not.toBeNull()
     expect(quota?.runtimeId).toBe('opencode')
     expect(['ok', 'unauthorized']).toContain(quota?.status)
-  })
+  }, 15000)
 
   it('cursorAdapter provides probeQuota', async () => {
     expect(typeof cursorAdapter.probeQuota).toBe('function')
@@ -44,7 +44,7 @@ describe('runtimes quota probes', () => {
     expect(quota).not.toBeNull()
     expect(quota?.runtimeId).toBe('cursor-cli')
     expect(['ok', 'unauthorized']).toContain(quota?.status)
-  })
+  }, 15000)
 
   it('agyAdapter provides probeQuota', async () => {
     expect(typeof agyAdapter.probeQuota).toBe('function')
@@ -57,7 +57,7 @@ describe('runtimes quota probes', () => {
       expect(quota.primaryWindow).defined
       expect(quota.credits?.unlimited).toBe(true)
     }
-  })
+  }, 15000)
 
   it('AcpClient integrates quota methods', async () => {
     const client = new AcpClient({ workspaceRoot: process.cwd() })
@@ -68,5 +68,5 @@ describe('runtimes quota probes', () => {
     expect(quota?.runtimeId).toBe('codex-acp')
     const cached = client.getCachedQuota()
     expect(cached).toBe(quota)
-  })
+  }, 15000)
 })

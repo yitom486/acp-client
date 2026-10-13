@@ -11,6 +11,8 @@
 export interface AcpQuotaLimitWindow {
   /** 限制窗口标识或名称，如 '5h limit', 'Weekly limit', 'Monthly limit' */
   label: string
+  /** 分组标识，如 'Gemini Models', 'Claude and GPT models' */
+  group?: string
   /** 剩余百分比 (0 - 100) */
   percentLeft: number
   /** 已用百分比 (0 - 100) */

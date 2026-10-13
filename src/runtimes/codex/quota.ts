@@ -47,9 +47,9 @@ let cachedDynamicResult: { res: CodexAppServerResult; time: number } | null = nu
  * 原生 JSON-RPC 探针: 直连 codex app-server 获取毫秒级实时额度与账户数据
  * 0 Token 消耗、0 ACP 上下文污染、独立并发安全
  */
-async function queryCodexAppServer(timeoutMs = 4000): Promise<CodexAppServerResult | null> {
+async function queryCodexAppServer(timeoutMs = 10000): Promise<CodexAppServerResult | null> {
   // 15 秒短缓存，避免高频请求重复创建子进程
-  if (cachedDynamicResult && Date.now() - cachedDynamicResult.time < 15000) {
+  if (cachedDynamicResult && Date.now() - cachedDynamicResult.time < 120000) {
     return cachedDynamicResult.res
   }
 
@@ -78,7 +78,8 @@ async function queryCodexAppServer(timeoutMs = 4000): Promise<CodexAppServerResu
     timer = setTimeout(() => cleanup(null), timeoutMs)
 
     try {
-      proc = spawn('codex', ['app-server'], {
+      const cmd = process.platform === 'win32' ? 'codex' : (existsSync('/mnt/c/Users') ? 'codex.exe' : 'codex')
+      proc = spawn(cmd, ['app-server'], {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: process.platform === 'win32',
         windowsHide: true,
@@ -197,7 +198,7 @@ export async function probeCodexQuota(options?: { sessionId?: string }): Promise
   }
 
   // 2. 原生动态 JSON-RPC 探针 (直连 codex app-server)
-  const dynamic = await queryCodexAppServer(4000)
+  const dynamic = await queryCodexAppServer(10000)
   if (dynamic) {
     isLoggedIn = true
     if (dynamic.account?.email) accountEmail = dynamic.account.email

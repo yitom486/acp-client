@@ -20,7 +20,7 @@ export const agyAdapter: GenericRuntimeAdapter = {
     return {...prep, env:{AGY_ACP_RESOURCES_DIR:directory}, report:{...prep.report, rulesPrepared:prep.report.rulesChars > 0}}
   },
   appResourceSessionMeta: directory => ({appResources:{directory}}),
-  supportedBridgeVersions: ['0.1.24'],
+  supportedBridgeVersions: ['0.1.24', '0.1.25'],
   probeAuth: () => probeAgyAuth(),
   probeQuota: (options) => probeAgyQuota(options),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,

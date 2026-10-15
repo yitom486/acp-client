@@ -302,9 +302,9 @@ describe('Claude native session configuration via real SDK and mock peer', () =>
 });
 
 
-it('agy native resource extension is version gated and delivered on session creation', async () => {
+it.each(['0.1.24', '0.1.25'])('agy %s native resources are delivered on session creation', async (bridgeVersion) => {
   const dir=resourceDir();
-  const client=mockClient(dir,'agy',{MOCK_BRIDGE_VERSION:'0.1.24'});
+  const client=mockClient(dir,'agy',{MOCK_BRIDGE_VERSION:bridgeVersion});
   expect((await client.connect()).ok).toBe(true);
   const created=await client.createSession();expect(created.ok).toBe(true);if(!created.ok)throw Error('session');
   await client.promptSession(created.value.sessionId,'PING-KEEP');

@@ -210,4 +210,4 @@ const client = new AcpClient({
 
 复跑：`bun scripts/smoke-opencode-resources.mjs <opencode-1.x-path> --session-config`。真实 ACP/本地 mock 模型验证 system 规则、零兼容前缀、MCP 与原生 skill，并检查断开后临时配置根已删除。默认不带参数继续验证原有 overlay 路径。
 
-Antigravity bridge 0.1.24 supports `resources.directory` through `_meta.appResources.directory` and private temporary additional workspaces. Rules and Skills are session-scoped, without changing cwd or global authentication. Unknown bridge versions retain compatibility delivery. Orderly close/delete/shutdown remove bridge-owned resources; forced termination cannot guarantee cleanup.
+Antigravity bridge 0.1.24 / 0.1.25 supports `resources.directory` through `_meta.appResources.directory` and private temporary additional workspaces. Rules and Skills are session-scoped, without changing cwd or global authentication. Unknown bridge versions retain compatibility delivery. Orderly close/delete/shutdown remove bridge-owned resources; forced termination cannot guarantee cleanup.

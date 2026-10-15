@@ -12,7 +12,7 @@ export const NATIVE_ELIGIBLE_BRIDGE_VERSIONS: Record<string, string[]> = {
   'codex-acp': ['2.2.2'],
   opencode: ['1.18.35'],
   claude: ['0.91.0'],
-  agy: ['0.1.24', '0.1.25'],
+  agy: ['0.1.24', '0.1.25', '0.1.26'],
 }
 
 export type NativeCompatReason =

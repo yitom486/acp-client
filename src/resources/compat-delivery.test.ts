@@ -302,7 +302,7 @@ describe('Claude native session configuration via real SDK and mock peer', () =>
 });
 
 
-it.each(['0.1.24', '0.1.25'])('agy %s native resources are delivered on session creation', async (bridgeVersion) => {
+it.each(['0.1.24', '0.1.25', '0.1.26'])('agy %s native resources are delivered on session creation', async (bridgeVersion) => {
   const dir=resourceDir();
   const client=mockClient(dir,'agy',{MOCK_BRIDGE_VERSION:bridgeVersion});
   expect((await client.connect()).ok).toBe(true);

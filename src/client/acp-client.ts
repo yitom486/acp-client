@@ -1,3 +1,4 @@
+import { closeAcpSessions } from './sdk-client'
 import { createSessionConfigHome, type SessionConfigHome } from '../resources/session-config'
 import { AvailableCommandsCache, type AcpAvailableCommand } from '../session/available-commands'
 import { QuotaCache } from '../session/quota'
@@ -713,6 +714,11 @@ export class AcpClient {
   async disconnect(reason?: string): Promise<void> {
     this.setStatus('disconnected', reason)
     this.resourcePrep = null
+    const capabilities = this.initResponse?.agentCapabilities?.sessionCapabilities as Record<string, unknown> | undefined
+    if (capabilities?.close && this.sdkConnection?.agent) {
+      const failed = await closeAcpSessions(this.sdkConnection.agent, this.sessionLedger.keys())
+      if (failed.length) this.callbacks.onLog?.('warn','Session close failed before process teardown',{count:failed.length})
+    }
     // 会话随进程消亡：兼容记账与快照一并清空，不向新连接串线
     this.sessionLedger.clear()
     this.compatSentKeys.clear()

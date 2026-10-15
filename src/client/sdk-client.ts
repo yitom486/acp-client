@@ -110,3 +110,13 @@ export async function sdkRequest<Response, Params>(
     if (timer !== undefined) clearTimeout(timer)
   }
 }
+
+/** Close owned sessions before transport/process teardown; unsupported failures stay bounded. */
+export async function closeAcpSessions(agent: ClientContext, sessionIds: Iterable<string>, timeoutMs = 2000): Promise<string[]> {
+  const failed: string[] = []
+  await Promise.all([...new Set(sessionIds)].map(async sessionId => {
+    try { await sdkRequest(agent, 'session/close', {sessionId}, timeoutMs) }
+    catch { failed.push(sessionId) }
+  }))
+  return failed
+}

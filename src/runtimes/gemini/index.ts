@@ -1,3 +1,4 @@
+import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -37,6 +38,7 @@ export function probeGeminiAuth(): CodexAuthPreflight {
 
 export const geminiAdapter: GenericRuntimeAdapter = {
   id: 'gemini',
+  prepareAppResources: async ({directory}) => prepareCompatibilityResources(directory, 'config-home-would-isolate-auth'),
   probeAuth: () => probeGeminiAuth(),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,
   canSkipInteractiveAuth: () => false,

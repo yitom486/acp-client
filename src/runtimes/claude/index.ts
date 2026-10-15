@@ -1,3 +1,4 @@
+import { prepareClaudeResources, claudeResourceSessionMeta } from '../../resources/runtime-bindings'
 export * from './quota'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -41,6 +42,9 @@ export function probeClaudeAuth(): CodexAuthPreflight {
 
 export const claudeAdapter: GenericRuntimeAdapter = {
   id: 'claude',
+  supportedBridgeVersions: ['0.91.0'],
+  prepareAppResources: async ({directory}) => prepareClaudeResources(directory),
+  appResourceSessionMeta: claudeResourceSessionMeta,
   probeAuth: () => probeClaudeAuth(),
   probeQuota: async (options) => probeClaudeQuota(options),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,

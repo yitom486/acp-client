@@ -1,3 +1,4 @@
+import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -50,6 +51,7 @@ export function probeCopilotAuth(): CodexAuthPreflight {
 
 export const copilotAdapter: GenericRuntimeAdapter = {
   id: 'copilot',
+  prepareAppResources: async ({directory}) => prepareCompatibilityResources(directory, 'native-entry-not-verified'),
   probeAuth: () => probeCopilotAuth(),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,
   canSkipInteractiveAuth: () => false,

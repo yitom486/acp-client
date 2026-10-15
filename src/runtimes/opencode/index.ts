@@ -1,3 +1,4 @@
+import { prepareOpenCodeResources } from '../../resources/runtime-bindings'
 export * from './quota'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -115,6 +116,8 @@ export function probeOpencodeAuth(overrides?: OpencodePathOverrides): CodexAuthP
 
 export const opencodeAdapter: GenericRuntimeAdapter = {
   id: 'opencode',
+  supportedBridgeVersions: ['1.18.35'],
+  prepareAppResources: prepareOpenCodeResources,
   probeAuth: () => probeOpencodeAuth(),
   probeQuota: async () => probeOpencodeQuota(),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,

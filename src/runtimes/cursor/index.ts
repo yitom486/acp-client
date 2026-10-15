@@ -1,3 +1,4 @@
+import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
 export * from './quota'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -254,6 +255,7 @@ export function probeCursorAuth(overrides?: CursorPathOverrides): CodexAuthPrefl
 
 export const cursorAdapter: GenericRuntimeAdapter = {
   id: 'cursor-cli',
+  prepareAppResources: async ({directory}) => prepareCompatibilityResources(directory, 'config-home-does-not-guarantee-rules'),
   probeAuth: () => probeCursorAuth(),
   probeQuota: async () => probeCursorQuota(),
   resolveSpawnCommand: () => resolveCursorSpawnCommand(),

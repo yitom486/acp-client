@@ -35,6 +35,9 @@ jobs:
       - name: Build distribution
         run: bun run build
 
+      - name: Verify package entrypoints and skill MCP
+        run: node scripts/smoke-dist-resources.mjs
+
   publish:
     name: Publish to NPM
     needs: test

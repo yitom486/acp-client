@@ -1,4 +1,5 @@
 import type { AcpAuthMethod, AcpProxySettings, CodexAuthPreflight, AcpAgentQuota } from "../contracts"
+import type { AppResourcePrep } from "../resources/app-resources"
 import { DEFAULT_ACP_RUNTIME_ID } from "../contracts"
 import { codexAdapter } from './codex'
 import { emptyAcpAuthPreflight } from './codex/codex-auth-preflight'
@@ -50,6 +51,22 @@ export interface GenericRuntimeAdapter {
     env: NodeJS.ProcessEnv
     envRemove: string[]
   }
+  /**
+   * 应用资源预准备（冷启动 spawn 前调用一次）：
+   * 读取宿主传入的资源目录，返回待注入的环境变量与加载报告。
+   * 缺省（undefined）= 该运行时无原生资源入口，调用方按兼容处理。
+   * 报告区分“SDK 已读取”与“运行时已加载”，不冒充后者。
+   */
+  prepareAppResources?: (input: {
+    directory: string
+    workspaceRoot: string
+    command?: string
+    /** 最终子进程有效环境；不要改读全局 process.env。 */
+    env?: NodeJS.ProcessEnv
+  }) => Promise<AppResourcePrep>
+  appResourceSessionMeta?: (directory: string) => Record<string, unknown> | undefined
+  /** 已核对的桥精确版本白名单（缺席=未声明，调用方按未知版本回退） */
+  supportedBridgeVersions?: string[]
   orderAuthMethods?: (methods: AcpAuthMethod[]) => AcpAuthMethod[]
   canSkipInteractiveAuth?: (methodId: string, force?: boolean) => boolean
   /**

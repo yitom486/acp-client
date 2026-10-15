@@ -29,6 +29,8 @@
   自动处理 `resume` → `load` → `new` 会话恢复流程，处理模型方言（models 数组/对象）、无 MCP 自动降级与网络抖动重试。
 - **解耦的事件钩子与审批**：
   工具调用审批、权限请求、会话流式更新采用标准的回调与事件驱动，宿主自由决定如何确认（命令行交互 / 桌面弹窗 / Web 消息）。
+- **应用资源目录（单目录接口）**：
+  宿主只传 `resources: { directory }`（`AGENTS.md` + `skills/<name>/SKILL.md`），SDK 负责读取、摘要、配置合并、资格/版本门、会话级记录与温复用标签；详见 `docs/api-reference.md §5` 与 `examples/app-resources-demo.ts`。
 
 ---
 
@@ -135,3 +137,15 @@ bun run build:acp
 ```bash
 bun run packages/acp/examples/standalone-acp-demo.ts
 ```
+
+资源接口当前为未发布试点：规则准备与会话应用分开记录；已有磁盘配置保守回退；skillsFound 仅 SDK 文件扫描，尚无原生技能挂载或通用兼容提示词注入。详见 docs/api-reference.md 第 5 节。
+
+应用资源跨运行时验收：OpenCode 1.18.35 已通过真实 ACP + 本地 mock 模型 + 技能 MCP 两轮链路，复跑脚本为 `scripts/smoke-opencode-resources.mjs`；2.0.6 完整链路仍待验，详见 `docs/api-reference.md` 支持矩阵。
+
+原生资源策略见 `src/resources/runtime-bindings.ts` / `docs/api-reference.md §5`：OpenCode 1.18.35 已验证原生 system 规则、native skill 和 MCP；Claude 0.91.0 已接官方原生会话扩展（仅源码契约+mock 验收）；其余运行时明确兼容，不自动迁移认证 HOME。
+
+会话专属配置环境：`resources: { directory, configurationScope: 'session' }`。仅替换子进程原生配置根，生成规则/纯文档技能、断开清理；不复制用户认证。支持范围、Cursor 规则边界及 agy/DeepSeek 的明确拒绝见 `docs/api-reference.md`。实现与测试：`src/resources/session-config.ts` / `session-config.test.ts`。
+
+### Antigravity session resources
+
+With `@yitom/agy-acp-map` 0.1.24, `resources.directory` is delivered through the bridge session extension `_meta.appResources.directory`. Rules, native Skills and session MCP live in a private temporary additional workspace; cwd, global configuration and authentication remain unchanged. Close/delete/orderly shutdown remove the temporary workspace. Unknown bridge versions keep compatibility guidance and the app-skills MCP fallback. This extension is bridge-specific, not a standard ACP configuration-home API. `configurationScope: "session"` also supports agy; its configuration report remains conservative until the bridge accepts the session extension.

@@ -3,12 +3,24 @@ import type { AcpRuntimeInfo } from "../contracts"
 
 export interface SpawnedAcpProcess {
   runtimeId: string
+  /** 宿主作用域键（如窗口/租户隔离；缺席=单宿主默认） */
+  scopeKey?: string
+  /** 执行环境标记（如 native / wsl:<distro>；宿主计算后传入） */
+  executionContext?: string
+  /** 应用资源绑定标签（内容摘要+运行时；缺席=未绑定，按旧语义复用） */
+  profileTag?: string | null
+  /** 握手后记录的桥版本（同进程内不变） */
+  bridgeVersion?: string
   child: ChildProcessWithoutNullStreams
   kill: () => void
   /** spawn 时间戳（保留供诊断/排序，stderr 归因已去窗口化，不再参与判定） */
   spawnedAt: number
   /** stderr 最后 N 行活引用（连接失败自诊断用，上限见 ACP_EARLY_EXIT_STDERR_TAIL_LINES） */
   stderrTail: string[]
+}
+
+function processKey(runtimeId: string, scopeKey?: string): string {
+  return scopeKey ? `${scopeKey}:${runtimeId}` : runtimeId
 }
 
 const active = new Map<string, SpawnedAcpProcess>()
@@ -27,6 +39,12 @@ export interface SpawnAcpOptions {
   env?: NodeJS.ProcessEnv
   /** 需要从继承环境里剔除的变量名（如关闭代理时清理 HTTP(S)_PROXY） */
   envRemove?: string[]
+  /** 宿主作用域键（窗口/租户隔离；缺席=单宿主默认，与旧键完全一致） */
+  scopeKey?: string
+  /** 执行环境标记（宿主计算后传入；复用时必须一致） */
+  executionContext?: string
+  /** 应用资源绑定标签（要求时不一致即视为无温进程） */
+  profileTag?: string | null
   onStderrLine?: (line: string) => void
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
 }
@@ -70,8 +88,9 @@ function resolveCommand(runtime: AcpRuntimeInfo): { file: string; shell: boolean
 }
 
 /**
- * 多运行时温进程隔离：`active` 按 runtime.id 分键，绝不跨 runtime 串用。
- * connect 前一律经 `getLiveAcpProcess(runtime.id)` 取同 runtime 温进程；
+ * 多运行时温进程隔离：`active` 按作用域+runtime.id 分键，绝不跨作用域或
+ * runtime 串用（无作用域时键即 runtime.id，与旧行为一致）。
+ * connect 前经 `getLiveAcpProcess` / `tryReuseLiveAcpProcess` 取温进程；
  * 不同 runtime 即使 command 相同也各持独立句柄。
  */
 // TODO(下游 contracts 未就绪): 8 模板落地后各 runtime 独立 command/args 在此自然分键，无需再改。
@@ -80,8 +99,9 @@ export function spawnAcpProcess(options: SpawnAcpOptions): SpawnedAcpProcess {
   if (!options.runtime?.id || !options.runtime.command || !Array.isArray(options.runtime.args)) {
     throw new Error(`ACP 运行时模板缺失 command/args: ${options.runtime?.id ?? '(empty)'}`)
   }
-  // 同 runtime 旧句柄先杀（换命令/参数后不复用）；其他 runtime 的温进程不受影响。
-  const existing = active.get(options.runtime.id)
+  // 同作用域旧句柄先杀（换命令/参数后不复用）；其他作用域/runtime 不受影响。
+  const key = processKey(options.runtime.id, options.scopeKey)
+  const existing = active.get(key)
   if (existing) {
     existing.kill()
   }
@@ -150,6 +170,9 @@ export function spawnAcpProcess(options: SpawnAcpOptions): SpawnedAcpProcess {
 
   const handle: SpawnedAcpProcess = {
     runtimeId: options.runtime.id,
+    scopeKey: options.scopeKey,
+    executionContext: options.executionContext,
+    profileTag: options.profileTag ?? null,
     child,
     spawnedAt: Date.now(),
     stderrTail,
@@ -175,7 +198,7 @@ export function spawnAcpProcess(options: SpawnAcpOptions): SpawnedAcpProcess {
           }
         }
       }
-      active.delete(options.runtime.id)
+      active.delete(key)
     },
   }
 
@@ -184,11 +207,11 @@ export function spawnAcpProcess(options: SpawnAcpOptions): SpawnedAcpProcess {
     const rest = stderrBuffer.trim()
     if (rest) pushStderrTailLine(rest)
     stderrBuffer = ''
-    active.delete(options.runtime.id)
+    if (active.get(key) === handle) active.delete(key)
     options.onExit?.(code, signal)
   })
 
-  active.set(options.runtime.id, handle)
+  active.set(key, handle)
   return handle
 }
 
@@ -228,29 +251,76 @@ export function disposeAllAcpProcesses(): void {
   active.clear()
 }
 
-export function getActiveAcpProcess(runtimeId: string): SpawnedAcpProcess | undefined {
-  return active.get(runtimeId)
+export function getActiveAcpProcess(runtimeId: string, scopeKey?: string): SpawnedAcpProcess | undefined {
+  return active.get(processKey(runtimeId, scopeKey))
 }
 
 /** 当前仍存活的温进程 runtime 清单（调试/测试用，不暴露 child 句柄细节）。 */
 export function listLiveAcpRuntimeIds(): string[] {
-  const ids: string[] = []
-  for (const [runtimeId, handle] of active) {
-    if (isSpawnedAcpProcessAlive(handle)) ids.push(runtimeId)
+  const ids = new Set<string>()
+  for (const handle of active.values()) {
+    if (isSpawnedAcpProcessAlive(handle)) ids.add(handle.runtimeId)
   }
-  return ids.sort()
+  return [...ids].sort()
+}
+
+export interface LiveAcpProcessQuery {
+  /** 宿主作用域键（与 spawn 时一致；缺席=单宿主默认） */
+  scopeKey?: string
+  /** 执行环境标记（宿主计算后传入；不一致不复用） */
+  executionContext?: string
+  /** 应用资源绑定标签（要求时不一致即视为无温进程） */
+  expectedTag?: string | null
 }
 
 /**
- * 取同 runtime 下仍存活的常驻进程（复用时用）。已退出或被外部杀掉的返回 undefined，
+ * 取仍存活的常驻进程（复用时用）。已退出或被外部杀掉的返回 undefined，
  * 调用方应走冷启动并顺手清扫其残留临时目录。
+ * 作用域/执行环境/绑定标签任一不匹配即视为无温进程；不要求标签时沿旧语义
+ * 复用（含无标签的老进程）。
  */
-export function getLiveAcpProcess(runtimeId: string): SpawnedAcpProcess | undefined {
-  const handle = active.get(runtimeId)
+export function getLiveAcpProcess(
+  runtimeId: string,
+  query: LiveAcpProcessQuery = {},
+): SpawnedAcpProcess | undefined {
+  const key = processKey(runtimeId, query.scopeKey)
+  const handle = active.get(key)
   if (!handle) return undefined
   if (!isSpawnedAcpProcessAlive(handle)) {
-    active.delete(runtimeId)
+    active.delete(key)
     return undefined
   }
+  if (query.executionContext !== undefined && (handle.executionContext ?? null) !== query.executionContext) {
+    return undefined
+  }
+  if (query.expectedTag !== undefined && (handle.profileTag ?? null) !== query.expectedTag) return undefined
   return handle
+}
+
+export type ReuseAcpProcessResult =
+  | { status: 'hit'; handle: SpawnedAcpProcess }
+  | { status: 'miss' }
+  | { status: 'busy'; handle: SpawnedAcpProcess }
+
+/**
+ * 标签感知复用裁决（连接层调用，替代裸 get + 自行 kill）：
+ * - 无存活进程 → miss（调用方冷启动）；
+ * - 标签一致 → hit（直接复用，不杀）；
+ * - 标签不一致但旧进程正忙（isBusy 为真）→ busy（沿用旧进程，不杀不断，
+ *   调用方降级兼容，新标签下次冷启动生效）；
+ * - 标签不一致且空闲 → 杀旧进程后 miss（调用方冷启动）。
+ * 不要求标签时等价于旧 getLive 语义。
+ */
+export function tryReuseLiveAcpProcess(
+  runtimeId: string,
+  query: LiveAcpProcessQuery & { isBusy?: (handle: SpawnedAcpProcess) => boolean } = {},
+): ReuseAcpProcessResult {
+  const hit = getLiveAcpProcess(runtimeId, query)
+  if (hit) return { status: 'hit', handle: hit }
+  if (query.expectedTag === undefined) return { status: 'miss' }
+  const stale = getLiveAcpProcess(runtimeId, { scopeKey: query.scopeKey, executionContext: query.executionContext })
+  if (!stale) return { status: 'miss' }
+  if (query.isBusy?.(stale)) return { status: 'busy', handle: stale }
+  stale.kill()
+  return { status: 'miss' }
 }

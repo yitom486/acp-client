@@ -1,3 +1,4 @@
+import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
 import type { AcpAuthMethod, CodexAuthPreflight } from "../../contracts"
 import { DEEPSEEK_DSH_NPM_PACKAGE } from "../../contracts"
 import type { GenericRuntimeAdapter } from '../index'
@@ -71,6 +72,7 @@ export function probeDeepseekAuth(): CodexAuthPreflight {
 
 export const deepseekAdapter: GenericRuntimeAdapter = {
   id: 'deepseek',
+  prepareAppResources: async ({directory}) => prepareCompatibilityResources(directory, 'native-config-entry-not-verified'),
   probeAuth: () => probeDeepseekAuth(),
   resolveSpawnCommand: () => resolveDeepseekSpawnCommand(),
   resolveSpawnBlocker: () => resolveDeepseekSpawnBlocker(),

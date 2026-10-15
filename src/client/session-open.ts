@@ -13,6 +13,8 @@ export interface RestoreOrCreateSessionInput {
   loadSupported: boolean
   /** 客户端自带的 MCP server（Inkdown 工具）；Agent 不支持 HTTP 传输时传空数组 */
   mcpServers?: unknown[]
+  /** Runtime-specific native options; not a standard ACP system prompt field. */
+  sessionMeta?: Record<string, unknown>
   /** session/load 回放期间回调（主进程用来压制 UI 更新） */
   onSuppressUpdates?: (suppress: boolean) => void
   /** 测试可设为 0 */
@@ -21,6 +23,9 @@ export interface RestoreOrCreateSessionInput {
 }
 
 export interface RestoreOrCreateSessionResult {
+  /** Agent accepted the supplied MCP descriptors; not proof of tool execution. */
+  mcpServersAccepted: boolean
+  nativeSessionAccepted: boolean
   sessionId: string
   configOptions: unknown
   restoreMethod: AcpSessionRestoreMethod
@@ -70,6 +75,26 @@ export async function restoreOrCreateAcpSession(
 ): Promise<RestoreOrCreateSessionResult> {
   const resumeId = input.resumeSessionId?.trim() || null
   const restoreAttempts: AcpSessionRestoreAttempt[] = []
+  let mcpServersAccepted = (input.mcpServers ?? []).length > 0
+  let nativeSessionAccepted = false
+  const request = async (method: string, params: Record<string, unknown>) => {
+    if (!input.sessionMeta) return input.request(method, params)
+    try {
+      const result = await input.request(method, { ...params, _meta: input.sessionMeta })
+      nativeSessionAccepted = true
+      return result
+    } catch (error) {
+      // An ambiguous transport failure may already have created a session. Do not create another.
+      const rejected = error instanceof RequestError && error.code === -32602
+        || /native.*meta.*reject|unsupported.*(meta|systemPrompt)|unknown.*(meta|systemPrompt)/i.test(errorMessage(error))
+      if (!rejected || isTransientAcpTransportError(error)) throw error
+      log('warn', 'native resource options failed; retry without extension')
+      // Keep MCP registration when the runtime rejects only its native extension.
+      const result = await input.request(method, params)
+      nativeSessionAccepted = false
+      return result
+    }
+  }
   const delayMs = input.retryDelayMs ?? 250
   const log =
     input.log ??
@@ -95,7 +120,7 @@ export async function restoreOrCreateAcpSession(
         maxTries,
       })
       try {
-        const result = (await input.request(rpcMethod, {
+        const result = (await request(rpcMethod, {
           sessionId: resumeId,
           cwd: input.cwd,
           mcpServers: input.mcpServers ?? [],
@@ -137,7 +162,7 @@ export async function restoreOrCreateAcpSession(
       mcpServers: input.mcpServers ?? [],
     }
     try {
-      return (await input.request('session/new', baseParams)) as Record<string, unknown>
+      return (await request('session/new', baseParams)) as Record<string, unknown>
     } catch (firstError) {
       // 已是裸调则无重试意义，直接抛
       if ((input.mcpServers ?? []).length === 0) throw firstError
@@ -145,10 +170,12 @@ export async function restoreOrCreateAcpSession(
         error: errorMessage(firstError),
       })
       try {
-        return (await input.request('session/new', {
+        const result = (await request('session/new', {
           cwd: input.cwd,
           mcpServers: [],
         })) as Record<string, unknown>
+        mcpServersAccepted = false
+        return result
       } catch {
         throw firstError
       }
@@ -167,6 +194,8 @@ export async function restoreOrCreateAcpSession(
         configOptions: withModelsFallback(resumed),
         restoreMethod: 'resume',
         sessionRestored: true,
+        mcpServersAccepted,
+        nativeSessionAccepted,
         requestedSessionId: resumeId,
         restoreAttempts,
       }
@@ -186,6 +215,8 @@ export async function restoreOrCreateAcpSession(
           configOptions: withModelsFallback(loaded),
           restoreMethod: 'load',
           sessionRestored: true,
+          mcpServersAccepted,
+          nativeSessionAccepted,
           requestedSessionId: resumeId,
           restoreAttempts,
         }
@@ -210,6 +241,8 @@ export async function restoreOrCreateAcpSession(
     configOptions: withModelsFallback(sessionResult),
     restoreMethod: 'new',
     sessionRestored: false,
+    mcpServersAccepted,
+    nativeSessionAccepted,
     requestedSessionId: resumeId ?? undefined,
     restoreAttempts,
   }

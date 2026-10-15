@@ -226,6 +226,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
       log: () => undefined,
     })
 
+    expect(result.mcpServersAccepted).toBe(false)
     expect(result.sessionId).toBe('n2')
     expect(result.restoreMethod).toBe('new')
     expect(calls).toBe(2)
@@ -351,3 +352,31 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
     expect(parsed.find((o) => o.configId === 'model')?.currentValue).toBe('a')
   })
 })
+
+describe('native resource session metadata', () => {
+  for (const method of ['new','resume','load'] as const) it('passes native options through session/'+method, async () => {
+    const calls: any[]=[];
+    const result=await restoreOrCreateAcpSession({
+      cwd:'/work',resumeSessionId:method==='new'?null:'old',resumeSupported:method==='resume',loadSupported:method==='load',
+      mcpServers:[{name:'caller',command:'server',args:[],env:[]}],
+      sessionMeta:{systemPrompt:{type:'preset',preset:'claude_code',append:'HOST'}},
+      request:async (rpc,params)=>{calls.push({rpc,params});return {sessionId:'result'}},log:()=>{},
+    });
+    expect(result.nativeSessionAccepted).toBe(true);
+    expect(result.mcpServersAccepted).toBe(true);
+    expect(calls[0].rpc).toBe('session/'+method);
+    expect(calls[0].params._meta.systemPrompt.append).toBe('HOST');
+    expect(calls[0].params.mcpServers[0].name).toBe('caller');
+    expect(calls[0].params.cwd).toBe('/work');
+  });
+});
+
+it('does not retry a possibly-created native session on transport timeout', async () => {
+  let calls=0;
+  await expect(restoreOrCreateAcpSession({
+    cwd:'/work',resumeSessionId:null,resumeSupported:false,loadSupported:false,
+    sessionMeta:{systemPrompt:{append:'HOST'}},
+    request:async()=>{calls++;throw new Error('ACP connection closed')},log:()=>{},
+  })).rejects.toThrow('ACP connection closed');
+  expect(calls).toBe(1);
+});

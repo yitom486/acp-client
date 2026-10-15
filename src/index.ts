@@ -31,6 +31,11 @@ export * from "./process/process-manager";
 // ── Agent 运行时矩阵 ──
 export * from "./runtimes";
 
+// ── 应用资源目录（单目录接口：读取/摘要/合并/资格门） ──
+export * from "./resources/app-resources";
+export * from "./resources/config-text";
+export * from "./resources/eligibility";
+
 // ── 传输 ──
 export * from "./transport/terminal-output-buffer";
 
@@ -51,3 +56,7 @@ export * from "./mcp/inkdown-mcp-toc-tools";
 export * from "./mcp/inkdown-mcp-rpc";
 
 export * from "./session/quota";
+
+export * from "./resources/runtime-bindings";
+
+export * from "./resources/session-config";

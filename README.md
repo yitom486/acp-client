@@ -151,3 +151,23 @@ bun run packages/acp/examples/standalone-acp-demo.ts
 With `@yitom/agy-acp-map` 0.1.24 / 0.1.25 / 0.1.26, `resources.directory` is delivered through the bridge session extension `_meta.appResources.directory`. Rules, native Skills and session MCP live in a private temporary additional workspace; cwd, global configuration and authentication remain unchanged. Close/delete/orderly shutdown remove the temporary workspace. Unknown bridge versions keep compatibility guidance and the app-skills MCP fallback. This extension is bridge-specific, not a standard ACP configuration-home API. `configurationScope: "session"` also supports agy; its configuration report remains conservative until the bridge accepts the session extension.
 
 Normal disconnect closes owned sessions on agents advertising `sessionCapabilities.close` before terminating the transport/process. Requests are bounded to two seconds; failures are logged and teardown continues. This permits session resource cleanup on Windows as well.
+
+### OpenCode ACP question compatibility
+
+When a host supplies application resources, OpenCode 1.18.35 and 2.0.6 receive a child-process-only
+OPENCODE_CONFIG_CONTENT overlay setting permission.question to deny. Its upstream ACP event
+dispatcher omits native questions in 1.18.35 and cancels form.created in 2.0.6.
+The v2 adapter prepares only the question overlay; native rules and skills remain unverified. The SDK preserves existing providers,
+models, MCP servers, instructions and all unrelated permission rules, including shorthand
+permission defaults. It never edits project/global OpenCode config files or authentication homes.
+Overlay and isolated session configuration use the same policy.
+
+Inspect resourceReport.openCodeQuestions: fallback + prepared means the overlay was prepared,
+not proof that the runtime applied it. Unknown releases report unverified + unchanged; no semver
+range or permission capability is treated as proof of question support. Hosts should provide
+an available MCP question tool or a textual question, wait for the user, and keep security
+approval separate. Standard ACP request_permission remains independent; elicitation support
+is negotiated separately and is not implied by permissions or this fallback.
+
+GitHub Actions builds and smoke-checks Linux, Windows and macOS packages and uploads a dist
+artifact per OS. Only version-tag pushes publish to npm; branch/PR builds do not publish.

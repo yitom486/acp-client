@@ -307,10 +307,17 @@ export class AcpClient {
         }
         this.sessionConfig = profile
         resourceEnv = this.sessionConfig.env
+        // Keep question compatibility consistent for isolated configuration homes.
+        const interactions = ['opencode', 'opencode-v2'].includes(this.runtimeInfo.id) && this.adapter.prepareAppResources
+          ? await this.adapter.prepareAppResources({ directory: this.resourcesDir, command: effectiveRuntime.command,
+              workspaceRoot: this.workspaceRoot, env: { ...process.env, ...spawnEnv.env, ...resourceEnv } })
+          : undefined
+        Object.assign(resourceEnv, interactions?.env)
         const load = readAppResourcesDir(this.resourcesDir)
         this.resourcePrep = {profileTag:null,report:{
           rulesApplied:false,rulesPrepared:false,skillsApplied:false,
           rulesChars:load.rules?.chars??0,profileDigest:digestAppResources(load),skillsFound:load.skills.map(s=>s.name),
+          openCodeQuestions:interactions?.report.openCodeQuestions,
           configurationScope:'session',configurationDirectory:this.sessionConfig.directory,
           configurationRulesFile:this.sessionConfig.rulesFile,
           reason:this.sessionConfig.nativeRules ? 'isolated-config-not-runtime-verified' : 'isolated-config-rule-discovery-not-verified',

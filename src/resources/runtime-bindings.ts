@@ -37,16 +37,47 @@ export function mergeOpenCodeAppConfig(raw: string | undefined, directory: strin
   })
 }
 
+/** Exact release checked against anomalyco/opencode v1.18.35 acp/event.ts.
+ * Permissions do not imply question support; unknown releases stay unchanged. */
+export function resolveOpenCodeQuestionMode(version: string): 'fallback' | 'unverified' {
+  return version.trim() === '1.18.35' ? 'fallback' : 'unverified'
+}
+
+/** Child-only overlay; preserve unrelated permissions, providers and authentication. */
+export function mergeOpenCodeQuestionConfig(raw: string | undefined): string {
+  const value: unknown = raw?.trim() ? JSON.parse(raw) : {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid-opencode-config')
+  const config = value as Record<string, unknown>
+  const permission = config.permission
+  if (permission !== undefined && (typeof permission !== 'string' || !['allow','ask','deny'].includes(permission)) &&
+      (!permission || typeof permission !== 'object' || Array.isArray(permission))) throw new Error('invalid-opencode-permission')
+  const rules = typeof permission === 'string' ? { '*': permission } : permission ?? {}
+  return JSON.stringify({ ...config, permission: { ...rules as Record<string, unknown>, question: 'deny' } })
+}
+
 export async function prepareOpenCodeResources(input: { directory: string; env?: NodeJS.ProcessEnv; command?: string }): Promise<AppResourcePrep> {
   const prep = prepareCompatibilityResources(input.directory, 'native-entry-not-verified')
-  // Probe the actual executable, not PATH's other OpenCode or a mock bridge.
-  if (!input.command || !readAppRulesText(input.directory)) return prep
+  prep.report.openCodeQuestions = { mode: 'unverified', configuration: 'unchanged', reason: 'version-not-verified' }
+  if (!input.command) return prep
   try {
     const { stdout } = await promisify(execFile)(input.command, ['--version'], { env: input.env, timeout: 8000, windowsHide: true })
-    if (stdout.trim() !== '1.18.35') return prep
-    const json = mergeOpenCodeAppConfig(input.env?.OPENCODE_CONFIG_CONTENT, input.directory)
-    return { env: { OPENCODE_CONFIG_CONTENT: json }, report: { ...prep.report, rulesPrepared: true, reason: undefined } }
-  } catch { return { ...prep, report: { ...prep.report, reason: 'native-config-prepare-failed' } } }
+    const version = stdout.trim()
+    if (resolveOpenCodeQuestionMode(version) !== 'fallback') {
+      prep.report.openCodeQuestions!.version = version
+      return prep
+    }
+    let json = mergeOpenCodeQuestionConfig(input.env?.OPENCODE_CONFIG_CONTENT)
+    const hasRules = !!readAppRulesText(input.directory)
+    if (hasRules) json = mergeOpenCodeAppConfig(json, input.directory)
+    return { env: { OPENCODE_CONFIG_CONTENT: json }, report: { ...prep.report,
+      rulesPrepared: hasRules, reason: hasRules ? undefined : 'missing-app-rules',
+      openCodeQuestions: { version, mode: 'fallback', configuration: 'prepared', reason: 'acp-question-not-forwarded' },
+    } }
+  } catch {
+    return { ...prep, report: { ...prep.report, reason: 'native-config-prepare-failed',
+      openCodeQuestions: { mode: 'unverified', configuration: 'unchanged', reason: 'prepare-failed' },
+    } }
+  }
 }
 
 export function prepareClaudeResources(directory: string): AppResourcePrep {

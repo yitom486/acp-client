@@ -7,7 +7,8 @@ import { mergeOpenCodeQuestionConfig, mergeOpenCodeAppConfig, resolveOpenCodeQue
 describe('OpenCode ACP question compatibility', () => {
   it('uses exact verified versions, without assuming native support on new releases', () => {
     expect(resolveOpenCodeQuestionMode('1.18.35\n')).toBe('fallback')
-    for (const v of ['', '1.18.34', '1.18.36', '2.0.6', '1.18.35-dev']) expect(resolveOpenCodeQuestionMode(v)).toBe('unverified')
+    expect(resolveOpenCodeQuestionMode('opencode v2.0.6\n')).toBe('fallback')
+    for (const v of ['', '1.18.34', '1.18.36', '2.0.7', '1.18.35-dev']) expect(resolveOpenCodeQuestionMode(v)).toBe('unverified')
   })
   it('preserves provider, MCP, model and granular permission settings without mutation', () => {
     const input = { model:'local/model', provider:{local:{options:{baseURL:'http://localhost'}}}, mcp:{host:{enabled:true}},
@@ -49,4 +50,19 @@ describe('OpenCode ACP question compatibility', () => {
       }
     } finally {rmSync(dir,{recursive:true,force:true})}
   })
+})
+
+// Opt-in local binary check: --version only, never authenticates or invokes a model.
+it.skipIf(!process.env.ACP_TEST_OPENCODE_BINARY)('prepares a v2 question overlay without claiming v1 rules or skills', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'acp-v2-question-'))
+  writeFileSync(join(dir,'AGENTS.md'),'HOST RULES')
+  try {
+    const prep=await prepareOpenCodeResources({directory:dir,command:process.env.ACP_TEST_OPENCODE_BINARY,
+      env:{...process.env,OPENCODE_CONFIG_CONTENT:'{"permission":{"bash":"ask"},"model":"keep"}'}})
+    expect(prep.report.openCodeQuestions).toEqual({version:'2.0.6',mode:'fallback',configuration:'prepared',reason:'acp-question-not-forwarded'})
+    expect(prep.report.rulesPrepared).toBe(false)
+    expect(prep.report.rulesApplied).toBe(false)
+    expect(JSON.parse(prep.env!.OPENCODE_CONFIG_CONTENT!)).toEqual({permission:{bash:'ask',question:'deny'},model:'keep'})
+    expect(Object.keys(prep.env!)).toEqual(['OPENCODE_CONFIG_CONTENT'])
+  } finally {rmSync(dir,{recursive:true,force:true})}
 })

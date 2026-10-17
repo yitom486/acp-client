@@ -1,4 +1,4 @@
-import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
+import { prepareOpenCodeResources } from '../../resources/runtime-bindings'
 import type { GenericRuntimeAdapter } from '../index'
 import { probeOpencodeAuth } from '../opencode'
 
@@ -12,7 +12,7 @@ import { probeOpencodeAuth } from '../opencode'
  */
 export const opencodeV2Adapter: GenericRuntimeAdapter = {
   id: 'opencode-v2',
-  prepareAppResources: async ({directory}) => prepareCompatibilityResources(directory, 'native-config-entry-not-verified'),
+  prepareAppResources: prepareOpenCodeResources,
   probeAuth: () => probeOpencodeAuth(),
   orderAuthMethods: (methods) => methods,
   canSkipInteractiveAuth: () => false,

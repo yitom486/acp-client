@@ -7,7 +7,7 @@ import { digestAppResources, readAppResourcesDir, readAppRulesText, type AppReso
 export const APP_RESOURCE_CAPABILITIES = {
   'codex-acp': { entry: 'CODEX_CONFIG', strategy: 'native-overlay', configHome: 'CODEX_HOME' },
   opencode: { entry: 'OPENCODE_CONFIG_CONTENT', strategy: 'native-overlay', configHome: 'OPENCODE_CONFIG_DIR' },
-  'opencode-v2': { entry: null, strategy: 'compatibility', configHome: null },
+  'opencode-v2': { entry: 'OPENCODE_CONFIG_CONTENT (questions only)', strategy: 'compatibility', configHome: null },
   claude: { entry: '_meta.systemPrompt + _meta.claudeCode.options.plugins', strategy: 'native-session', configHome: 'CLAUDE_CONFIG_DIR' },
   gemini: { entry: null, strategy: 'compatibility', configHome: 'GEMINI_CLI_HOME' },
   copilot: { entry: null, strategy: 'compatibility', configHome: 'COPILOT_HOME', candidateEntry: 'COPILOT_CUSTOM_INSTRUCTIONS_DIRS' },
@@ -37,10 +37,11 @@ export function mergeOpenCodeAppConfig(raw: string | undefined, directory: strin
   })
 }
 
-/** Exact release checked against anomalyco/opencode v1.18.35 acp/event.ts.
- * Permissions do not imply question support; unknown releases stay unchanged. */
+/** Verified: 1.18.35 acp/event.ts omits questions; the 2.0.6 Windows ACP
+ * dispatcher cancels form.created. Neither implies native resource loading. */
 export function resolveOpenCodeQuestionMode(version: string): 'fallback' | 'unverified' {
-  return version.trim() === '1.18.35' ? 'fallback' : 'unverified'
+  const normalized = version.trim().replace(/^opencode\s+v?/i, '')
+  return ['1.18.35', '2.0.6'].includes(normalized) ? 'fallback' : 'unverified'
 }
 
 /** Child-only overlay; preserve unrelated permissions, providers and authentication. */
@@ -61,16 +62,16 @@ export async function prepareOpenCodeResources(input: { directory: string; env?:
   if (!input.command) return prep
   try {
     const { stdout } = await promisify(execFile)(input.command, ['--version'], { env: input.env, timeout: 8000, windowsHide: true })
-    const version = stdout.trim()
+    const version = stdout.trim().replace(/^opencode\s+v?/i, '')
     if (resolveOpenCodeQuestionMode(version) !== 'fallback') {
       prep.report.openCodeQuestions!.version = version
       return prep
     }
     let json = mergeOpenCodeQuestionConfig(input.env?.OPENCODE_CONFIG_CONTENT)
-    const hasRules = !!readAppRulesText(input.directory)
+    const hasRules = version === '1.18.35' && !!readAppRulesText(input.directory)
     if (hasRules) json = mergeOpenCodeAppConfig(json, input.directory)
     return { env: { OPENCODE_CONFIG_CONTENT: json }, report: { ...prep.report,
-      rulesPrepared: hasRules, reason: hasRules ? undefined : 'missing-app-rules',
+      rulesPrepared: hasRules, reason: hasRules ? undefined : version === '2.0.6' ? 'native-entry-not-verified' : 'missing-app-rules',
       openCodeQuestions: { version, mode: 'fallback', configuration: 'prepared', reason: 'acp-question-not-forwarded' },
     } }
   } catch {

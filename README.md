@@ -154,9 +154,10 @@ Normal disconnect closes owned sessions on agents advertising `sessionCapabiliti
 
 ### OpenCode ACP question compatibility
 
-When a host supplies application resources, OpenCode 1.18.35 receives a child-process-only
+When a host supplies application resources, OpenCode 1.18.35 and 2.0.6 receive a child-process-only
 OPENCODE_CONFIG_CONTENT overlay setting permission.question to deny. Its upstream ACP event
-dispatcher does not forward native question requests. The SDK preserves existing providers,
+dispatcher omits native questions in 1.18.35 and cancels form.created in 2.0.6.
+The v2 adapter prepares only the question overlay; native rules and skills remain unverified. The SDK preserves existing providers,
 models, MCP servers, instructions and all unrelated permission rules, including shorthand
 permission defaults. It never edits project/global OpenCode config files or authentication homes.
 Overlay and isolated session configuration use the same policy.

@@ -308,7 +308,7 @@ export class AcpClient {
         this.sessionConfig = profile
         resourceEnv = this.sessionConfig.env
         // Keep question compatibility consistent for isolated configuration homes.
-        const interactions = this.runtimeInfo.id === 'opencode' && this.adapter.prepareAppResources
+        const interactions = ['opencode', 'opencode-v2'].includes(this.runtimeInfo.id) && this.adapter.prepareAppResources
           ? await this.adapter.prepareAppResources({ directory: this.resourcesDir, command: effectiveRuntime.command,
               workspaceRoot: this.workspaceRoot, env: { ...process.env, ...spawnEnv.env, ...resourceEnv } })
           : undefined

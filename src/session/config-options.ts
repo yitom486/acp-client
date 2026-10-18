@@ -16,6 +16,36 @@ function coerceCurrentValue(raw: unknown): string | boolean | undefined {
   return undefined
 }
 
+/** Flatten flat and grouped `options` entries into the host's flat value list. */
+function appendOptionValues(raw: unknown, out: AcpConfigOptionValue[], group?: string): void {
+  if (!Array.isArray(raw)) return
+  for (const opt of raw) {
+    if (!opt || typeof opt !== 'object') continue
+    const o = opt as Record<string, unknown>
+    // 声明 parameterizedModelPicker 后 cursor 下发布尔/数字型选项值
+    // （如 { value: false, name: 'Off' }），统一转 string 存（AcpConfigOptionValue.value 仍为 string）。
+    const value = coerceOptionValue(o.value) ?? coerceOptionValue(o.id)
+    if (value) {
+      const name = typeof o.name === 'string' ? o.name : String(value)
+      out.push({
+        value,
+        name: group ? `${group} · ${name}` : name,
+        description: typeof o.description === 'string' ? o.description : undefined,
+      })
+      continue
+    }
+    // ACP grouped select: { group, name, options: [...] }; no value of its own.
+    if (!Array.isArray(o.options)) continue
+    const label =
+      typeof o.group === 'string'
+        ? o.group
+        : typeof o.name === 'string' && o.name.trim()
+          ? o.name
+          : group
+    appendOptionValues(o.options, out, label)
+  }
+}
+
 export function parseAcpConfigOptions(raw: unknown): AcpConfigOption[] {
   if (!Array.isArray(raw)) return []
   const options: AcpConfigOption[] = []
@@ -32,21 +62,7 @@ export function parseAcpConfigOptions(raw: unknown): AcpConfigOption[] {
     const name = typeof row.name === 'string' ? row.name : configId
     const type = typeof row.type === 'string' ? row.type : 'select'
     const values: AcpConfigOptionValue[] = []
-    if (Array.isArray(row.options)) {
-      for (const opt of row.options) {
-        if (!opt || typeof opt !== 'object') continue
-        const o = opt as Record<string, unknown>
-        // 声明 parameterizedModelPicker 后 cursor 下发布尔/数字型选项值
-        // （如 { value: false, name: 'Off' }），统一转 string 存（AcpConfigOptionValue.value 仍为 string）。
-        const value = coerceOptionValue(o.value) ?? coerceOptionValue(o.id)
-        if (!value) continue
-        values.push({
-          value,
-          name: typeof o.name === 'string' ? o.name : String(value),
-          description: typeof o.description === 'string' ? o.description : undefined,
-        })
-      }
-    }
+    appendOptionValues(row.options, values)
     options.push({
       configId,
       name,

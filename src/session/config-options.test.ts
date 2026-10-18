@@ -26,6 +26,33 @@ describe('parseAcpConfigOptions', () => {
     expect(findModelConfigOption(options)?.options?.[1]?.name).toBe('Strong')
   })
 
+  it('flattens grouped ACP select options (DSH model groups)', () => {
+    const options = parseAcpConfigOptions([{
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue: '["deepseek-official","deepseek-v4"]',
+      options: [
+        {
+          group: 'deepseek-official',
+          name: 'DeepSeek',
+          options: [{ value: '["deepseek-official","deepseek-v4"]', name: 'DeepSeek V4' }],
+        },
+        {
+          group: 'openai',
+          name: 'OpenAI',
+          options: [{ value: '["openai","gpt-x"]', name: 'GPT X' }],
+        },
+      ],
+    }])
+    expect(findModelConfigOption(options)?.currentValue).toBe('["deepseek-official","deepseek-v4"]')
+    expect(options[0]?.options).toEqual([
+      { value: '["deepseek-official","deepseek-v4"]', name: 'deepseek-official · DeepSeek V4', description: undefined },
+      { value: '["openai","gpt-x"]', name: 'openai · GPT X', description: undefined },
+    ])
+  })
+
   it('accepts legacy id field', () => {
     const options = parseAcpConfigOptions([{ id: 'mode', name: 'Mode', type: 'select' }])
     expect(options[0]?.configId).toBe('mode')

@@ -2,6 +2,7 @@ import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
 import type { AcpAuthMethod, CodexAuthPreflight } from "../../contracts"
 import { DEEPSEEK_DSH_NPM_PACKAGE } from "../../contracts"
 import type { GenericRuntimeAdapter } from '../index'
+import { probeDeepseekQuota } from './quota'
 
 /**
  * DeepSeek 运行时适配器（`bunx @deepseek-ai/dsh --profile acp`）。
@@ -74,6 +75,8 @@ export const deepseekAdapter: GenericRuntimeAdapter = {
   id: 'deepseek',
   prepareAppResources: async ({directory}) => prepareCompatibilityResources(directory, 'native-config-entry-not-verified'),
   probeAuth: () => probeDeepseekAuth(),
+  /** 账户余额走官方 `/user/balance`（API Key 计费口径）；无公开速率窗口。 */
+  probeQuota: () => probeDeepseekQuota(),
   resolveSpawnCommand: () => resolveDeepseekSpawnCommand(),
   resolveSpawnBlocker: () => resolveDeepseekSpawnBlocker(),
   orderAuthMethods: (methods: AcpAuthMethod[]) => methods,

@@ -31,6 +31,10 @@ describe('deepseek 缺 key 预检判停', () => {
     expect(deepseekAdapter.resolveSpawnBlocker).toBeTypeOf('function')
   })
 
+  it('adapter 接线 probeQuota（余额/账户探测由 quota.test 覆盖）', () => {
+    expect(deepseekAdapter.probeQuota).toBeTypeOf('function')
+  })
+
   it('probeAuth 与阻断一致：无 key 不谎报已登录', () => {
     const saved = process.env.DEEPSEEK_API_KEY
     try {

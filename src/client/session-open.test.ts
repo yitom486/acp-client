@@ -221,7 +221,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
       resumeSessionId: null,
       resumeSupported: false,
       loadSupported: false,
-      mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x' }],
+      mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x', headers: [] }],
       retryDelayMs: 0,
       log: () => undefined,
     })
@@ -250,7 +250,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
         resumeSessionId: null,
         resumeSupported: false,
         loadSupported: false,
-        mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x' }],
+        mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x', headers: [] }],
         retryDelayMs: 0,
         log: () => undefined,
       }),
@@ -284,7 +284,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
       resumeSessionId: 'old-1',
       resumeSupported: true,
       loadSupported: true,
-      mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x' }],
+      mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x', headers: [] }],
       retryDelayMs: 0,
       log: () => undefined,
     })

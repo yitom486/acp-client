@@ -10,6 +10,7 @@ import {
   type ClientApp,
   type ClientConnection,
   type InitializeResponse,
+  type McpServer,
 } from '@agentclientprotocol/sdk'
 import type {
   AcpAuthMethod,
@@ -528,7 +529,7 @@ export class AcpClient {
   /** 创建或恢复会话 */
   async createSession(options?: {
     resumeSessionId?: string | null
-    mcpServers?: unknown[]
+    mcpServers?: McpServer[]
   }): Promise<Result<AcpSessionHandle, AppError>> {
     if (!this.sdkConnection?.agent) {
       return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })

@@ -157,6 +157,13 @@ export function readAppRulesText(directory: string): string | null {
 }
 
 export interface AppResourceReport {
+  /** Prepared process overlay, not proof of runtime loading or UI MCP availability. */
+  openCodeQuestions?: {
+    version?: string
+    mode: 'fallback' | 'unverified'
+    configuration: 'prepared' | 'unchanged'
+    reason: string
+  }
   /** Child-only isolated config roots; existence is not proof the runtime loaded rules. */
   configurationScope?: 'session'
   configurationDirectory?: string

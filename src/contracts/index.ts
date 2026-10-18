@@ -195,6 +195,11 @@ export interface AcpConfigOptionValue {
   value: string
   name: string
   description?: string
+  /**
+   * 分组名（ACP 允许 select 选项嵌套 `{group, name, options}`）。
+   * 解析时拍平为一维列表并保留分组标签，value 保持 agent 原始编码不变。
+   */
+  group?: string
 }
 
 export interface AcpConfigOption {
@@ -437,6 +442,30 @@ export interface AcpProxySettings {
   port: number
 }
 
+/**
+ * DeepSeek（dsh）自定义端点/凭证：宿主表单「URL + Token」的落库形状。
+ * 落库后由 SDK 在 spawn 时转成 `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`，
+ * 不写 harness 自己的 `$DSH_HOME/.credentials.yaml`（留在官方位置）。
+ */
+export interface AcpDeepseekProviderStatus {
+  configured: boolean
+  /** 已落库的端点；未配置时不返回 */
+  baseUrl?: string
+  /**
+   * 是否使用官方默认端点（未配置或配置值等于官方地址）。
+   * 宿主据此渲染「官方 / 自定义」二选一。
+   */
+  isOfficial: boolean
+  hasApiKey: boolean
+}
+
+export interface AcpDeepseekProviderSavePayload {
+  /** 空串/未填时回落官方端点 */
+  baseUrl?: string
+  /** 空串时保留已存的 Key（只改端点不重填 Token 的常见操作） */
+  apiKey?: string
+}
+
 // ── 运行时适配器常量与包名 ──
 
 export const CODEX_ACP_NPM_PACKAGE = '@agentclientprotocol/codex-acp' as const
@@ -532,9 +561,9 @@ export const BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[] = [
     id: 'deepseek',
     name: 'DeepSeek',
     description:
-      '通过 bunx 启动 @deepseek-ai/dsh（--profile acp）；无 ACP 登录，靠 harness 自身凭证（DEEPSEEK_API_KEY / harness 配置）；模型经 session 到达，无需额外动作',
+      '通过 dsh 启动 @deepseek-ai/dsh（--profile acp）；无 ACP 登录，靠 harness 自身凭证（DEEPSEEK_API_KEY 或 $DSH_HOME/.credentials.yaml）；模型经 session 到达（V4.1-Flash 的 id 是 deepseek-flash）',
     authHint:
-      '无 ACP 登录，靠 harness 自身凭证（DEEPSEEK_API_KEY / harness 配置）；未配置先导出 DEEPSEEK_API_KEY；模型经 session 到达，无需额外动作；若官方最新 dsh 存在坏依赖（如 rc.3 缺失），可设 DSH_PACKAGE pin 旧版',
+      '无 ACP 登录，靠 harness 自身凭证；先导出 DEEPSEEK_API_KEY 或在 dsh 里完成登录；稳定安装可设 DSH_BIN 指向 dsh 入口（bunx 临时目录被清理会让 profile 断链）；pin 包版本用 DSH_PACKAGE（如 @deepseek-ai/dsh@0.2.1-rc.2）',
     command: 'bunx',
     args: ['-y', `${DEEPSEEK_DSH_NPM_PACKAGE}@latest`, '--profile', 'acp'],
     requiredEnvKeys: ['DEEPSEEK_API_KEY'],

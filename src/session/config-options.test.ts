@@ -203,3 +203,70 @@ describe('mergeTopLevelModelsIntoConfigOptions', () => {
     expect(mergeTopLevelModelsIntoConfigOptions(base, { sessionId: 's' })).toBe(base)
   })
 })
+
+describe('dsh 分组模型选项（DeepSeek ACP 实测形状）', () => {
+  // 取自真实 dsh 0.2.1-rc.2 `session/new` 响应：model 选项按 provider 分组，
+  // value 是 JSON 编码的 [provider, model] 串。
+  const payload = [
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue: '["deepseek-official","deepseek-flash"]',
+      options: [
+        {
+          group: 'deepseek-official',
+          name: 'DeepSeek',
+          options: [
+            { value: '["deepseek-official","deepseek-flash"]', name: 'DeepSeek-V4.1-Flash' },
+            { value: '["deepseek-official","deepseek-v4-pro"]', name: 'DeepSeek-V4-Pro' },
+          ],
+        },
+      ],
+    },
+  ]
+
+  it('拍平分组并保留 group 标签', () => {
+    const model = findModelConfigOption(parseAcpConfigOptions(payload))
+    expect(model?.options).toEqual([
+      {
+        value: '["deepseek-official","deepseek-flash"]',
+        name: 'DeepSeek-V4.1-Flash',
+        group: 'deepseek-official',
+        description: undefined,
+      },
+      {
+        value: '["deepseek-official","deepseek-v4-pro"]',
+        name: 'DeepSeek-V4-Pro',
+        group: 'deepseek-official',
+        description: undefined,
+      },
+    ])
+  })
+
+  it('value 原样保留，可回写 set_config_option', () => {
+    const model = findModelConfigOption(parseAcpConfigOptions(payload))
+    expect(model?.currentValue).toBe('["deepseek-official","deepseek-flash"]')
+    expect(model?.options?.[0]?.value).toBe(model?.currentValue)
+  })
+
+  it('兼容无 group 字段的嵌套命名分组', () => {
+    const options = parseAcpConfigOptions([
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        options: [
+          { name: 'DeepSeek', options: [{ value: 'a', name: 'A' }] },
+          { value: 'b', name: 'B' },
+        ],
+      },
+    ])
+    expect(options[0]?.options).toEqual([
+      { value: 'a', name: 'A', group: 'DeepSeek', description: undefined },
+      { value: 'b', name: 'B', description: undefined },
+    ])
+  })
+})

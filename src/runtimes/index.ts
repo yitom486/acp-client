@@ -27,9 +27,13 @@ export interface GenericRuntimeAdapter {
   beforeSpawn?: () => Promise<void>
   /** 仅冷启动（无温进程可用、即将 spawn）时调用一次；各 runtime 自理副作用 */
   onColdStart?: () => Promise<void>
-  probeAuth: () => CodexAuthPreflight
+  probeAuth: (context?: { env?: NodeJS.ProcessEnv; dataDir?: string }) => CodexAuthPreflight
   /** 运行时配额探针（5h 限制、周额度、余额），与会话生命周期解耦 */
-  probeQuota?: (options?: { sessionId?: string }) => Promise<AcpAgentQuota | null>
+  probeQuota?: (options?: {
+    sessionId?: string
+    dataDir?: string
+    env?: NodeJS.ProcessEnv
+  }) => Promise<AcpAgentQuota | null>
   /**
    * 预 spawn 接线点（冷启动 spawn 前调用一次）：
    * 返回 `{ command, args }` 则覆盖模板的 spawn 目标（可透传绝对路径）；
@@ -44,9 +48,24 @@ export interface GenericRuntimeAdapter {
    * 返回非空字符串表示直接判停，`acp-connection.ts` 以该文案回带
    * `ACP_SPAWN_ERROR`，不触达 spawn（如 deepseek 缺 DEEPSEEK_API_KEY 时
    * harness 秒退，stdio 关闭即裸 `ACP connection closed`）。
+   * 上下文带宿主显式 env 与 dataDir：运行时可有自己的凭证落库（如 DeepSeek
+   * 的 URL+Token 表单），预检必须与 spawn 用同一份事实，否则会出现
+   * “表单填了却仍被判停”。
    * 缺省（undefined）/返回空表示放行；抛错时按放行处理（防御性回落），不断连接。
    */
-  resolveSpawnBlocker?: () => string | null | undefined
+  resolveSpawnBlocker?: (context?: {
+    env?: NodeJS.ProcessEnv
+    dataDir?: string
+  }) => string | null | undefined
+  /**
+   * 运行时自有凭证落库 → 追加 spawn 环境（缺省不注入）。
+   * 在代理/调用方 env 合成之后合并；`currentEnv` 已含的键由实现方决定是否覆盖
+   * （DeepSeek 的做法是显式 env 优先，落库只补空缺）。
+   */
+  getProviderEnv?: (context: {
+    dataDir: string
+    env: NodeJS.ProcessEnv
+  }) => NodeJS.ProcessEnv | undefined
   getSpawnEnv?: (proxySettings?: Partial<AcpProxySettings>) => {
     env: NodeJS.ProcessEnv
     envRemove: string[]

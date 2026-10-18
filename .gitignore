@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.tgz
 .DS_Store
+
+# 本地 dsh（DeepSeek ACP）调试产物：运行时应装在 DSH_BIN 指向的稳定目录，不入库
+.dsh-runtime/
+.dsh-home/
+.npm-cache/
+.probe/
+.tmp/

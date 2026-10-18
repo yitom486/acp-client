@@ -57,7 +57,11 @@ export async function provisionCustomProviderCodexHome(
 }
 
 export interface CodexRuntimeAdapter extends GenericRuntimeAdapter {
-  probeQuota?: (options?: { sessionId?: string }) => Promise<AcpAgentQuota | null>
+  probeQuota?: (options?: {
+    sessionId?: string
+    dataDir?: string
+    env?: NodeJS.ProcessEnv
+  }) => Promise<AcpAgentQuota | null>
   id: 'codex-acp'
   probeAuth: () => CodexAuthPreflight
   getCustomProvider: () => Promise<{

@@ -10,6 +10,7 @@ import {
   type ClientApp,
   type ClientConnection,
   type InitializeResponse,
+  type McpServer,
 } from '@agentclientprotocol/sdk'
 import type {
   AcpAuthMethod,
@@ -263,8 +264,11 @@ export class AcpClient {
     try {
       this.setStatus('connecting')
 
-      // 1. 预检判停
-      const blocker = this.adapter.resolveSpawnBlocker?.()
+      // 1. 预检判停（带上显式 env 与 dataDir：运行时的凭证落库也要参与判定）
+      const blocker = this.adapter.resolveSpawnBlocker?.({
+        env: { ...process.env, ...this.extraEnv },
+        dataDir: this.dataDir,
+      })
       if (blocker) {
         this.setStatus('error', blocker)
         return err({ code: 'ACP_SPAWN_ERROR', message: blocker })
@@ -293,6 +297,13 @@ export class AcpClient {
         ...baseEnv,
         env: { ...(baseEnv.env ?? {}), ...(this.extraEnv ?? {}) },
       }
+      // 运行时自有凭证落库（如 DeepSeek 的 URL+Token 表单）：在显式 env 之后、
+      // resources 之前注入——落库只补空缺，不覆盖调用方显式传入的值。
+      const providerEnv =
+        this.adapter.getProviderEnv?.({
+          dataDir: this.dataDir,
+          env: { ...process.env, ...spawnEnv.env },
+        }) ?? {}
 
       // 应用资源准备（单目录接口）：仅当宿主传入 resources.directory 且
       // adapter 声明 prepareAppResources 时执行；准备失败不阻断连接，
@@ -307,10 +318,17 @@ export class AcpClient {
         }
         this.sessionConfig = profile
         resourceEnv = this.sessionConfig.env
+        // Keep question compatibility consistent for isolated configuration homes.
+        const interactions = ['opencode', 'opencode-v2'].includes(this.runtimeInfo.id) && this.adapter.prepareAppResources
+          ? await this.adapter.prepareAppResources({ directory: this.resourcesDir, command: effectiveRuntime.command,
+              workspaceRoot: this.workspaceRoot, env: { ...process.env, ...spawnEnv.env, ...resourceEnv } })
+          : undefined
+        Object.assign(resourceEnv, interactions?.env)
         const load = readAppResourcesDir(this.resourcesDir)
         this.resourcePrep = {profileTag:null,report:{
           rulesApplied:false,rulesPrepared:false,skillsApplied:false,
           rulesChars:load.rules?.chars??0,profileDigest:digestAppResources(load),skillsFound:load.skills.map(s=>s.name),
+          openCodeQuestions:interactions?.report.openCodeQuestions,
           configurationScope:'session',configurationDirectory:this.sessionConfig.directory,
           configurationRulesFile:this.sessionConfig.rulesFile,
           reason:this.sessionConfig.nativeRules ? 'isolated-config-not-runtime-verified' : 'isolated-config-rule-discovery-not-verified',
@@ -353,7 +371,7 @@ export class AcpClient {
           skillsFound: load.skills.map(s => s.name), reason: 'runtime-not-supported',
         } } : null
       }
-      const finalEnv = { ...spawnEnv.env, ...resourceEnv }
+      const finalEnv = { ...spawnEnv.env, ...providerEnv, ...resourceEnv }
 
       // 4. 冷启动/生命周期钩子
       await this.adapter.beforeSpawn?.()
@@ -491,22 +509,32 @@ export class AcpClient {
 
   /** 最近一次 available_commands_update 的命令列表（未收到过则为 undefined） */
   getCachedQuota(sessionId?: string): AcpAgentQuota | undefined {
-    return this.quotaCache.get(sessionId, this.runtimeInfo.id)
+    return (
+      this.quotaCache.applyContextUsage(
+        this.quotaCache.get(sessionId, this.runtimeInfo.id),
+        sessionId,
+        this.runtimeInfo.id,
+      ) ?? undefined
+    )
   }
 
   async getQuota(sessionId?: string): Promise<AcpAgentQuota | null> {
-    const cached = this.getCachedQuota(sessionId)
+    const cached = this.quotaCache.get(sessionId, this.runtimeInfo.id)
     if (cached && Date.now() - cached.updatedAt < 30_000) {
-      return cached
+      return this.quotaCache.applyContextUsage(cached, sessionId, this.runtimeInfo.id)
     }
     if (this.adapter.probeQuota) {
-      const probed = await this.adapter.probeQuota({ sessionId })
+      const probed = await this.adapter.probeQuota({
+        sessionId,
+        dataDir: this.dataDir,
+        env: { ...process.env, ...this.extraEnv },
+      })
       if (probed) {
         this.quotaCache.set(probed, sessionId)
-        return probed
+        return this.quotaCache.applyContextUsage(probed, sessionId, this.runtimeInfo.id)
       }
     }
-    return cached ?? null
+    return this.quotaCache.applyContextUsage(cached ?? null, sessionId, this.runtimeInfo.id)
   }
 
   getAvailableCommands(sessionId: string): AcpAvailableCommand[] | undefined {
@@ -521,7 +549,7 @@ export class AcpClient {
   /** 创建或恢复会话 */
   async createSession(options?: {
     resumeSessionId?: string | null
-    mcpServers?: unknown[]
+    mcpServers?: McpServer[]
   }): Promise<Result<AcpSessionHandle, AppError>> {
     if (!this.sdkConnection?.agent) {
       return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })

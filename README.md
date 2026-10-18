@@ -41,11 +41,31 @@
 | `codex-acp` | ChatGPT | `~/.codex/auth.json` / 自定义供应商 API Key | 支持隔离 `CODEX_HOME` 生成 `config.toml` |
 | `claude` | Claude | `~/.claude.json` / `ANTHROPIC_API_KEY` | 自动复用本机 Claude Code CLI 登录态 |
 | `cursor-cli` | Cursor | `CURSOR_API_KEY` / 系统 Keychain 登录态 | 自动探测 `%LOCALAPPDATA%\cursor-agent\agent.cmd` |
-| `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` | 缺 key 提前拦截判停，避免子进程秒退 |
+| `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` 或 `~/.dsh/.credentials.yaml` | 缺凭证提前判停；`DSH_BIN` 指向稳定安装，`DSH_PACKAGE` pin 版本 |
 | `gemini` | Gemini | `~/.gemini/oauth_creds.json` / `GEMINI_API_KEY` | 自动探测 OAuth 凭证与系统 Key |
 | `copilot` | Copilot | `~/.copilot/config.json` / `GH_TOKEN` | 自动提取 `loggedInUsers` 凭证列表 |
 | `opencode` | OpenCode | `$XDG_DATA_HOME/opencode/auth.json` | 遵循 XDG / `%LOCALAPPDATA%` 规范 |
 | `agy` | agy | 官方桥接器免密直连 | `tryDirectSessionFirst` 免鉴权直通 |
+
+### DeepSeek（dsh）在新机器上接入
+
+不需要改任何本机 profile，三步即可复现：
+
+```bash
+node scripts/setup-dsh-acp.mjs     # 装/复用用户级运行时并自检 ACP 握手
+export DEEPSEEK_API_KEY=sk-...     # 或在 dsh/桌面版里登录（二选一）
+```
+
+如果用户本机根本没装/没登录 harness，宿主可以直接用内置的「URL + Token」表单，免环境变量：
+
+```typescript
+import { saveDeepseekProvider, getDeepseekProviderStatus } from '@yitom/acp-client'
+
+getDeepseekProviderStatus() // { configured, baseUrl?, isOfficial, hasApiKey }
+saveDeepseekProvider({ baseUrl: 'https://api.deepseek.com', apiKey: 'sk-...' }) // URL 留空即官方端点
+```
+
+SDK 会按 `DSH_BIN` → 用户级稳定安装（自动取已装最高版本）→ `DSH_PACKAGE` → `bunx` 的顺序解析启动目标，并在 spawn 时附加 `--patch` 覆盖层把会话模型修正为 `deepseek-flash`（= DeepSeek-V4.1-Flash；桌面端的 `1017` 只是 UI 徽标）。详见 [API 参考 §DeepSeek](./docs/api-reference.md)。
 
 ---
 
@@ -151,3 +171,27 @@ bun run packages/acp/examples/standalone-acp-demo.ts
 With `@yitom/agy-acp-map` 0.1.24 / 0.1.25 / 0.1.26, `resources.directory` is delivered through the bridge session extension `_meta.appResources.directory`. Rules, native Skills and session MCP live in a private temporary additional workspace; cwd, global configuration and authentication remain unchanged. Close/delete/orderly shutdown remove the temporary workspace. Unknown bridge versions keep compatibility guidance and the app-skills MCP fallback. This extension is bridge-specific, not a standard ACP configuration-home API. `configurationScope: "session"` also supports agy; its configuration report remains conservative until the bridge accepts the session extension.
 
 Normal disconnect closes owned sessions on agents advertising `sessionCapabilities.close` before terminating the transport/process. Requests are bounded to two seconds; failures are logged and teardown continues. This permits session resource cleanup on Windows as well.
+
+### OpenCode ACP question compatibility
+
+When a host supplies application resources, OpenCode 1.18.35 and 2.0.6 receive a child-process-only
+OPENCODE_CONFIG_CONTENT overlay setting permission.question to deny. Its upstream ACP event
+dispatcher omits native questions in 1.18.35 and cancels form.created in 2.0.6.
+The v2 adapter prepares only the question overlay; native rules and skills remain unverified. The SDK preserves existing providers,
+models, MCP servers, instructions and all unrelated permission rules, including shorthand
+permission defaults. It never edits project/global OpenCode config files or authentication homes.
+Overlay and isolated session configuration use the same policy.
+
+Inspect resourceReport.openCodeQuestions: fallback + prepared means the overlay was prepared,
+not proof that the runtime applied it. Unknown releases report unverified + unchanged; no semver
+range or permission capability is treated as proof of question support. Hosts should provide
+an available MCP question tool or a textual question, wait for the user, and keep security
+approval separate. Standard ACP request_permission remains independent; elicitation support
+is negotiated separately and is not implied by permissions or this fallback.
+
+GitHub Actions builds and smoke-checks Linux, Windows and macOS packages and uploads a dist
+artifact per OS. Only version-tag pushes publish to npm; branch/PR builds do not publish.
+
+### 宿主接入的通用生命周期
+
+`src/client/sdk-client.ts` 统一官方 SDK 流桥接、请求超时与方法类型推导；`connectSdkClient` 可传第四参 `{ name }`。`src/client/session-open.ts` 统一恢复/新建、原生扩展回退与有界工具输出恢复。`preserveMcpOnRetry: true` 保留重试时的 MCP 工具；缺省保持旧客户端的裸调回退策略。窗口、IPC、诊断日志由宿主提供，不进入协议包。

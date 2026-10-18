@@ -5,7 +5,7 @@ import {
   type AcpPermissionOutcome,
   type InkdownVirtualResource,
 } from "../contracts"
-import { methods, RequestError, type ClientApp } from '@agentclientprotocol/sdk'
+import { methods, RequestError, type ClientApp, type RequestPermissionRequest, type SessionNotification } from '@agentclientprotocol/sdk'
 import { acpReadTextFile, acpWriteTextFile } from './acp-fs'
 import type { AcpTerminalManager } from './acp-terminal'
 
@@ -20,10 +20,10 @@ export interface AcpClientHandlerDeps {
    */
   onPermission: (payload: {
     sessionId?: string
-    params: Record<string, unknown>
+    params: RequestPermissionRequest
   }) => Promise<AcpPermissionOutcome>
   /** session/update 通知透传（回放压制由调用方做） */
-  onSessionUpdate: (params: Record<string, unknown>) => void
+  onSessionUpdate: (params: SessionNotification) => void
 }
 
 function toInvalidParams(message: string): RequestError {
@@ -41,7 +41,7 @@ function toServerError(error: unknown, fallback: string): RequestError {
  */
 export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandlerDeps): void {
   app.onRequest(methods.client.session.requestPermission, async (ctx) => {
-    const params = ctx.params as unknown as Record<string, unknown>
+    const params = ctx.params
     const toolCall = params.toolCall
     const toolHint =
       toolCall && typeof toolCall === 'object'
@@ -210,7 +210,7 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
     deps.onSessionUpdate({
       sessionId: ctx.params.sessionId,
       update: ctx.params.update,
-    } as unknown as Record<string, unknown>)
+    })
   })
 }
 

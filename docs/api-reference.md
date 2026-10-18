@@ -211,3 +211,140 @@ const client = new AcpClient({
 复跑：`bun scripts/smoke-opencode-resources.mjs <opencode-1.x-path> --session-config`。真实 ACP/本地 mock 模型验证 system 规则、零兼容前缀、MCP 与原生 skill，并检查断开后临时配置根已删除。默认不带参数继续验证原有 overlay 路径。
 
 Antigravity bridge 0.1.24 / 0.1.25 / 0.1.26 supports `resources.directory` through `_meta.appResources.directory` and private temporary additional workspaces. Rules and Skills are session-scoped, without changing cwd or global authentication. Unknown bridge versions retain compatibility delivery. Orderly close/delete/shutdown remove bridge-owned resources; forced termination cannot guarantee cleanup.
+
+### DeepSeek（dsh）对接要点（2026-10-18 实测 0.2.1-rc.2）
+
+ACP 侧是 `dsh --profile acp`：`initialize` 返回 `authMethods: []`（天然 `skip_auth`），`session/new` 返回的 `model` 选项按 provider 分组，value 是 `["provider","model"]` 的 JSON 串。宿主拿到的 `configOptions[].options[].value` 必须原样回写 `set_config_option`，SDK 只拍平分组并保留 `group`，不改写 value。
+
+模型口径：官方 catalog 里 **`deepseek-flash` 就是 DeepSeek-V4.1-Flash**（桌面的 `1017` 是 `dsh-client-ui-deepseek-model-label-1017` 这个 UI 徽标包，不是模型版本）。V4-Pro 是 `deepseek-v4-pro`。
+
+#### 可迁移性：不写用户 profile
+
+`dsh-acp-app` 自带补丁把默认模型写死成 `deepseek-v4-flash`（该 id 不在 catalog 里），所以自动化会话默认拿不到 V4.1。SDK **不修改** `$DSH_HOME/profiles/acp/cordis.patch.yml`，而是在 spawn 时追加启动器自带的覆盖层：
+
+```bash
+dsh --profile acp --patch <系统临时目录>/acp-dsh-runtime/acp-model-deepseek-official--deepseek-flash.patch.yml
+```
+
+补丁文件由 `src/runtimes/deepseek/dsh-acp-bootstrap.ts` 生成并在内容变化时重写，随代码走、换机不丢。可用环境变量调整：
+
+| 变量 | 作用 | 缺省 |
+|---|---|---|
+| `DSH_MODEL` | 覆盖模型 id | `deepseek-flash`（V4.1-Flash） |
+| `DSH_PROVIDER` | 覆盖 provider | `deepseek-official`（account 路线填 `deepseek-account`） |
+| `DSH_ACP_MODEL_PATCH` | `off`/`0`/`false`/`none` 关闭覆盖层 | 开启 |
+| `DSH_RUNTIME_DIR` | 用户级运行时根目录 | Win `%LOCALAPPDATA%\acp-dsh`；mac `~/Library/Application Support/acp-dsh`；Linux `$XDG_DATA_HOME/acp-dsh` |
+| `DSH_RUNTIME_VERSION` | 固定使用某个已装版本 | 未设时**自动取已装最高版本** |
+| `DSH_BIN` | 显式 dsh 入口（最高优先级） | 无 |
+| `DSH_PACKAGE` | npm 定位符覆盖 | `@deepseek-ai/dsh@latest` |
+
+启动目标优先级：`DSH_BIN` → 用户级稳定安装（自动取已装最高版本）→ `DSH_PACKAGE` → `bunx -y @deepseek-ai/dsh@latest`。
+
+**升级语义**：用户用 `node scripts/setup-dsh-acp.mjs --version 0.3.0`（或 `--version latest|next`）装了新版本后，acp-client 下次连接就自动选中它，不需要改代码或改配置——版本目录扫描 + 取最高，见 `resolveManagedDshVersion`。
+
+#### 没有本地 harness 也能用：URL + Token 表单
+
+宿主可以完全不要求用户预装/登录 harness，直接弹一个「端点 + Token」表单：
+
+```typescript
+import {
+  DEEPSEEK_OFFICIAL_BASE_URL, // 'https://api.deepseek.com/anthropic'
+  getDeepseekProviderStatus,
+  saveDeepseekProvider,
+  clearDeepseekProvider,
+} from '@yitom/acp-client'
+
+// 1) 初始化表单：baseUrl 缺省就是官方端点；状态里不含 Key 明文
+const status = getDeepseekProviderStatus() // { configured, baseUrl?, isOfficial, hasApiKey }
+
+// 2) 保存：baseUrl 留空 = 官方；填 'https://api.deepseek.com' 会自动补 /anthropic；
+//    apiKey 留空 = 保留原 Token（只切端点不重填）
+const saved = saveDeepseekProvider({ baseUrl: 'https://api.deepseek.com', apiKey: 'sk-...' })
+
+// 3) 之后照常 new AcpClient({ runtime: 'deepseek' }).connect() 即可
+clearDeepseekProvider() // 退出登录/切换租户
+```
+
+落库位置：`<dataDir>/agent/deepseek-provider.json`（只存 baseUrl + apiKey，不写 harness 的 `.credentials.yaml`）。连接时 SDK 通过适配器的 `getProviderEnv` 自动转成 `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY` —— 也就是 harness 官方认的变量（实测：空 `DSH_HOME` + 仅环境变量 Key，`session/new` 就能列出 V4.1-Flash 与 V4-Pro）。
+
+凭证优先级（高 → 低）：
+
+1. `AcpClient({ env })` 显式传入；
+2. 表单落库；
+3. 进程环境同名变量；
+4. harness 自身登录（`$DSH_HOME/.credentials.yaml`）。
+
+四种都不是时才会在 spawn 前判停。也就是说：**本地已登录 → 开箱即用；没登录 → 填表单；表单也不填 → 给出明确动作指引**。
+
+#### 新机器接入（三步）
+
+```bash
+# 1. 装/复用用户级运行时（幂等；自动取平台的稳定目录）+ 自检握手
+node scripts/setup-dsh-acp.mjs
+#    只报告不改动：node scripts/setup-dsh-acp.mjs --check
+#    指定目录/版本/镜像：--runtime-dir <p> --version <v> --registry <url>
+
+# 2. 认证：二选一
+#    a) 在 dsh/桌面版里登录（写 $DSH_HOME/.credentials.yaml）
+#    b) export DEEPSEEK_API_KEY=sk-...
+
+# 3. 宿主直接 connect；SDK 自动解析到稳定安装并附加模型覆盖层
+```
+
+`setup-dsh-acp.mjs` 的 `--verify` 会用与 SDK 完全相同的命令行跑一次 `initialize` + `session/new`，打印当前模型与可选项，看不到 `DeepSeek-V4.1-Flash` 即非零退出。
+
+启动稳定性：bunx 把包装在临时目录，harness 的 `$DSH_HOME/profiles/node_modules` 会软链过去，临时目录被清理后 profile 直接断链；稳定安装命中后不会再有这个问题，且 `bunx` 仍保留为最后回落。凭证既可来自 `DEEPSEEK_API_KEY`，也可来自 harness 自身登录（`.credentials.yaml` 的 `records`）；两者都没有时 SDK 在 spawn 前判停，避免 harness 秒退只剩裸 `connection closed`。
+
+#### 余额与上下文用量
+
+ACP 协议本身**没有**余额接口；它只有 `usage_update` 事件（`used` / `size`，表示本次会话的上下文 token 占用），dsh 会发。SDK 把这个事件并入 `getQuota()` 结果的 `extraWindows`（label=`Context`），与账户余额分账存放、读取时合并：
+
+```typescript
+const quota = await client.getQuota()
+quota?.credits     // { balance: 110, currency: 'CNY' }  ← GET /user/balance
+quota?.status      // 'ok' | 'exhausted' | 'unauthorized'
+quota?.extraWindows // [{ label: 'Context', used, total, percentLeft }]  ← usage_update
+```
+
+余额走 DeepSeek 官方 `GET /user/balance`（Bearer API Key），Key 来源优先级：显式 `env` → 表单落库 → harness 凭证库 `refs.DEEPSEEK_API_KEY`。无 Key、401/403 一律返回 `status: 'unauthorized'`（不静默）；网络失败返回 `null`，调用方沿用 30 秒缓存，不谎报额度。注意余额接口挂在 API 根上，SDK 会把 base URL 的 `/anthropic` 去掉再请求。
+
+### Agent 版本策略
+
+ACP agent 是**外部程序**，不是 acp-client 的依赖，所以不写进本包 `package.json`：写进去会把「SDK 发版」和「agent 发版」绑死，还会强制所有宿主用同一版本。当前按三类解析（2026-10-18 实测）：
+
+| 类型 | 运行时 | 解析方式 | 当前版本 |
+|---|---|---|---|
+| npm 包 + `@latest` | codex-acp / claude / agy / opencode v2 | 每次冷启动向 registry 取最新 | 2.2.2 / 0.93.0 / 0.1.30 / 2.0.32 |
+| 本机 CLI（用户装什么用什么） | gemini / copilot / opencode v1 / cursor | 探测安装路径与登录态，不代装 | 用户本地版本 |
+| 稳定安装 + 版本覆盖 | deepseek | 自动取已装最高版本；`DSH_PACKAGE` / `DSH_RUNTIME_VERSION` 可锁 | 0.2.1-rc.2（npm latest 仍是 0.2.0-rc.2） |
+
+想锁版本时的做法：DeepSeek 用 `DSH_PACKAGE=@deepseek-ai/dsh@X` 或 `setup-dsh-acp.mjs --version X`；其它 npm 包运行时目前统一走 `@latest`，若将来需要锁定，按 `DSH_PACKAGE` 的同一模式给各自加覆盖变量即可，不建议下沉到 `package.json`。`opencode-v2` 已按 `npx -y @opencode/cli acp` 接入 2.x 最新版，无需额外动作；`opencode`（v1）则取决于用户本机安装的二进制。
+
+### 跨运行时：哪些一样，哪些不一样
+
+**宿主代码形态完全一样**——换 `runtime` 字符串即可，同一个宿主可以并存多个运行时（温进程按 runtime id + 作用域分键）：
+
+```typescript
+for (const runtime of ['deepseek', 'opencode-v2', 'codex-acp']) {
+  const client = new AcpClient({ runtime, workspaceRoot, callbacks })
+  await client.connect()
+  const session = await client.createSession()
+  await session.prompt('你好')
+}
+```
+
+统一层包括：`connect` / `createSession`（resume → load → new）/ `prompt` / `setConfigOption` / `disconnect`、事件回调（session update、权限审批、snapshot、终端）、模型通道（`configOptions` + `set_config_option`）、进程与 stdio 托管、错误码模型。
+
+差异在**配置面**（由各 agent 自身协议决定，SDK 不臆造）：
+
+| 维度 | DeepSeek（dsh） | OpenCode 1.x | OpenCode 2.x |
+|---|---|---|---|
+| 启动 | 自动装（稳定目录 / bunx），无需预装 | **用户本机 `opencode` 二进制** | `npx -y @opencode/cli` 自动 |
+| 凭证 | `DEEPSEEK_API_KEY` / URL+Token 表单 / harness 登录 | `opencode auth login` → `auth.json`（仅探测） | SQLite（文件探针会漏检） |
+| 宿主表单 | ✅ 有 API（`saveDeepseekProvider`） | ❌ 不建议（v2 已迁 SQLite，写 auth.json 无效） | ❌ 同左 |
+| 登录 gate | `authMethods: []`，天然 `skip_auth` | 有 authMethods，可能 `needs_auth` | 同 v1，但 `tryDirectSessionFirst` 直连兜底 |
+| 应用资源 | 兼容模式（不臆造配置入口） | 原生 overlay（`OPENCODE_CONFIG_CONTENT` 合并 instructions/skills） | 同 v1 |
+| 配额探针 | ❌ | ✅ | ❌ |
+| 桥版本门 | ❌ | `1.18.35` 已核对 | ❌ |
+
+给宿主的落地结论：DeepSeek 可以做到「表单填完即用」；OpenCode 必须尊重它自己的登录方式（v1 装 CLI + `auth login`，v2 直接 `auth login`），**不要用统一表单去伪造**，否则 v2 的 SQLite 凭据会失效。

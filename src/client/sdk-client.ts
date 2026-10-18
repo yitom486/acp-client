@@ -6,6 +6,10 @@ import {
   type ClientApp,
   type ClientConnection,
   type ClientContext,
+  type AgentRequestMethod,
+  type AgentRequestParamsByMethod,
+  type AgentRequestResponsesByMethod,
+  methods,
   type Stream,
 } from '@agentclientprotocol/sdk'
 
@@ -29,6 +33,8 @@ export interface SdkStreamHandle {
 export function createSdkStreamHandle(child: ChildProcessWithoutNullStreams): SdkStreamHandle {
   const stdoutBridge = new PassThrough()
   const stdinBridge = new PassThrough()
+  stdoutBridge.on('error', () => {})
+  stdinBridge.on('error', () => {})
   child.stdout.pipe(stdoutBridge)
   stdinBridge.pipe(child.stdin, { end: false })
   const output = Writable.toWeb(stdinBridge) as unknown as WritableStream<Uint8Array>
@@ -74,11 +80,12 @@ export function connectSdkClient(
   configure: (app: ClientApp) => void,
   /** 所属运行时 id：仅日志/隔离用，不改变 SDK 建连形态；缺省向后兼容单 codex 路径 */
   runtimeId?: string,
+  options: { name?: string } = {},
 ): { app: ClientApp; connection: ClientConnection; streamHandle: SdkStreamHandle } {
   if (runtimeId && process.env.NODE_ENV !== 'production') {
     console.info(`[acp:sdk] connect runtime=${runtimeId} pid=${child.pid ?? '?'}`)
   }
-  const app = createSdkClientApp({ name: 'inkdown' })
+  const app = createSdkClientApp({ name: options.name ?? 'inkdown' })
   configure(app)
   const streamHandle = createSdkStreamHandle(child)
   const connection = app.connect(streamHandle.stream)
@@ -86,6 +93,13 @@ export function connectSdkClient(
 }
 
 /** 带显式超时的 agent.request：超时 abort（触发 $/cancel_request）并拒绝 */
+export function sdkRequest<Method extends AgentRequestMethod>(
+  agent: ClientContext, method: Method, params: AgentRequestParamsByMethod[Method], timeoutMs?: number,
+): Promise<AgentRequestResponsesByMethod[Method]>
+/** Explicit generic overload for vendor extensions and legacy callers. */
+export function sdkRequest<Response, Params>(
+  agent: ClientContext, method: string, params: Params, timeoutMs?: number,
+): Promise<Response>
 export async function sdkRequest<Response, Params>(
   agent: ClientContext,
   method: string,
@@ -115,7 +129,7 @@ export async function sdkRequest<Response, Params>(
 export async function closeAcpSessions(agent: ClientContext, sessionIds: Iterable<string>, timeoutMs = 2000): Promise<string[]> {
   const failed: string[] = []
   await Promise.all([...new Set(sessionIds)].map(async sessionId => {
-    try { await sdkRequest(agent, 'session/close', {sessionId}, timeoutMs) }
+    try { await sdkRequest(agent, methods.agent.session.close, {sessionId}, timeoutMs) }
     catch { failed.push(sessionId) }
   }))
   return failed

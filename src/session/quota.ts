@@ -139,6 +139,9 @@ export function parseRateLimitsFromStatusText(
 export class QuotaCache {
   private bySession = new Map<string, AcpAgentQuota>()
   private byRuntime = new Map<string, AcpAgentQuota>()
+  /** ACP `usage_update` 的上下文占用（token 用量），与余额探针分账存放 */
+  private usageBySession = new Map<string, { used: number; size: number; updatedAt: number }>()
+  private usageByRuntime = new Map<string, { used: number; size: number; updatedAt: number }>()
 
   observe(params: unknown, defaultRuntimeId = 'unknown'): AcpAgentQuota | null {
     if (!params || typeof params !== 'object') return null
@@ -146,11 +149,25 @@ export class QuotaCache {
       sessionId?: unknown
       update?: {
         sessionUpdate?: unknown
+        used?: unknown
+        size?: unknown
         content?: { type?: unknown; text?: unknown }
         message?: { content?: Array<{ type?: unknown; text?: unknown }> }
       }
     }
     const sessionId = typeof p.sessionId === 'string' ? p.sessionId : undefined
+
+    // ACP `usage_update`：dsh 等 agent 报的上下文占用（used/size），不是账户余额。
+    if (p.update?.sessionUpdate === 'usage_update') {
+      const used = Number(p.update.used)
+      const size = Number(p.update.size)
+      if (Number.isFinite(used) && Number.isFinite(size) && size > 0) {
+        const usage = { used, size, updatedAt: Date.now() }
+        if (sessionId) this.usageBySession.set(sessionId, usage)
+        this.usageByRuntime.set(defaultRuntimeId, usage)
+      }
+      return null
+    }
 
     let textToParse = ''
     if (p.update?.content && p.update.content.type === 'text' && typeof p.update.content.text === 'string') {
@@ -193,8 +210,39 @@ export class QuotaCache {
     return undefined
   }
 
+  /**
+   * 把 `usage_update` 的上下文占用并入配额对象（读取时合并，不覆盖余额）：
+   * 有余额时作为 `extraWindows` 的 `Context` 窗口；没有余额但有用量时，
+   * 单独给出一个以 Context 为主窗口的配额，避免 UI 一片空白。
+   */
+  applyContextUsage(
+    quota: AcpAgentQuota | null | undefined,
+    sessionId?: string,
+    runtimeId = 'unknown',
+  ): AcpAgentQuota | null {
+    const usage =
+      (sessionId ? this.usageBySession.get(sessionId) : undefined) ?? this.usageByRuntime.get(runtimeId)
+    if (!usage) return quota ?? null
+    const usedPercent =
+      usage.size > 0 ? Math.min(100, Math.round((usage.used / usage.size) * 100)) : 0
+    const window: AcpQuotaLimitWindow = {
+      label: 'Context',
+      used: usage.used,
+      total: usage.size,
+      usedPercent,
+      percentLeft: Math.max(0, 100 - usedPercent),
+    }
+    if (!quota) {
+      return { runtimeId, primaryWindow: window, status: 'ok', updatedAt: usage.updatedAt }
+    }
+    const rest = (quota.extraWindows ?? []).filter((item) => item.label !== 'Context')
+    return { ...quota, extraWindows: [window, ...rest] }
+  }
+
   clear(): void {
     this.bySession.clear()
     this.byRuntime.clear()
+    this.usageBySession.clear()
+    this.usageByRuntime.clear()
   }
 }

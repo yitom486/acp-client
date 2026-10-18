@@ -1,19 +1,75 @@
 import type { AcpConfigOption, AcpConfigOptionValue } from "../contracts"
 
-/** 选项值 coercion：string 原样（空串视为缺失），number/boolean 转 string；其余返回 null。 */
+/**
+ * 选项值 coercion：string 原样（空串视为缺失），number/boolean 转 string；
+ * 数组/对象按 JSON 序列化——dsh 的模型选项值就是 `["provider","model"]` 编码串，
+ * 回写 set_config_option 时必须与 agent 的 choices 键逐字节一致；其余返回 null。
+ */
 function coerceOptionValue(raw: unknown): string | null {
   if (typeof raw === 'string') return raw || null
   if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
   if (typeof raw === 'boolean') return String(raw)
+  if (raw !== null && typeof raw === 'object') {
+    // 空对象没有可回写的语义，按缺失处理；非空数组/对象才是真实选项值。
+    if (!Array.isArray(raw) && Object.keys(raw as Record<string, unknown>).length === 0) return null
+    try {
+      const encoded = JSON.stringify(raw)
+      return encoded && encoded !== 'null' ? encoded : null
+    } catch {
+      return null
+    }
+  }
   return null
 }
 
-/** currentValue coercion：string/boolean 原样保留，number 转 string；其余返回 undefined。 */
+/** currentValue coercion：string/boolean 原样保留，number 转 string；数组/对象 JSON 化；其余返回 undefined。 */
 function coerceCurrentValue(raw: unknown): string | boolean | undefined {
   if (typeof raw === 'string') return raw
   if (typeof raw === 'boolean') return raw
   if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
+  if (raw !== null && typeof raw === 'object') {
+    if (!Array.isArray(raw) && Object.keys(raw as Record<string, unknown>).length === 0) return undefined
+    try {
+      const encoded = JSON.stringify(raw)
+      return encoded && encoded !== 'null' ? encoded : undefined
+    } catch {
+      return undefined
+    }
+  }
   return undefined
+}
+
+/**
+ * 递归拍平 select 选项树：ACP 允许 `{group, name, options}` 分组，组内才是
+ * 真正的 `{value, name}`。拍平后保留 `group` 标签供宿主分组渲染，value 一律
+ * 不改写——否则 set_config_option 回写时会匹配不上 agent 侧的选择键。
+ */
+function collectOptionValues(
+  rows: unknown[],
+  group: string | undefined,
+  out: AcpConfigOptionValue[],
+): void {
+  for (const opt of rows) {
+    if (!opt || typeof opt !== 'object') continue
+    const o = opt as Record<string, unknown>
+    const nested = Array.isArray(o.options) ? o.options : null
+    const label = typeof o.group === 'string' && o.group ? o.group : group
+    if (nested && nested.length > 0) {
+      const fallbackName = typeof o.name === 'string' && o.name ? o.name : undefined
+      collectOptionValues(nested, label ?? fallbackName, out)
+      continue
+    }
+    // 声明 parameterizedModelPicker 后 cursor 下发布尔/数字型选项值
+    // （如 { value: false, name: 'Off' }），统一转 string 存（AcpConfigOptionValue.value 仍为 string）。
+    const value = coerceOptionValue(o.value) ?? coerceOptionValue(o.id)
+    if (!value) continue
+    out.push({
+      value,
+      name: typeof o.name === 'string' ? o.name : String(value),
+      ...(typeof o.description === 'string' ? { description: o.description } : {}),
+      ...(label ? { group: label } : {}),
+    })
+  }
 }
 
 export function parseAcpConfigOptions(raw: unknown): AcpConfigOption[] {
@@ -32,21 +88,7 @@ export function parseAcpConfigOptions(raw: unknown): AcpConfigOption[] {
     const name = typeof row.name === 'string' ? row.name : configId
     const type = typeof row.type === 'string' ? row.type : 'select'
     const values: AcpConfigOptionValue[] = []
-    if (Array.isArray(row.options)) {
-      for (const opt of row.options) {
-        if (!opt || typeof opt !== 'object') continue
-        const o = opt as Record<string, unknown>
-        // 声明 parameterizedModelPicker 后 cursor 下发布尔/数字型选项值
-        // （如 { value: false, name: 'Off' }），统一转 string 存（AcpConfigOptionValue.value 仍为 string）。
-        const value = coerceOptionValue(o.value) ?? coerceOptionValue(o.id)
-        if (!value) continue
-        values.push({
-          value,
-          name: typeof o.name === 'string' ? o.name : String(value),
-          description: typeof o.description === 'string' ? o.description : undefined,
-        })
-      }
-    }
+    if (Array.isArray(row.options)) collectOptionValues(row.options, undefined, values)
     options.push({
       configId,
       name,

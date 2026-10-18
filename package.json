@@ -34,7 +34,8 @@
     "build": "node scripts/sync-version.mjs && bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && bun build ./src/mcp/app-skills-mcp-serve.ts --outfile ./dist/app-skills-mcp-serve.cjs --format cjs --target node && bun build ./src/sidecar/main.ts --outfile ./dist/sidecar.cjs --format cjs --target node && tsc -p tsconfig.json",
     "test": "vitest run",
     "prepublishOnly": "bun run build",
-    "version": "node scripts/sync-version.mjs && git add src/version.ts"
+    "version": "node scripts/sync-version.mjs && git add src/version.ts",
+    "test:mcp": "vitest run src/client/mcp-session-recovery.test.ts src/client/acp-client-mcp.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.0.0"

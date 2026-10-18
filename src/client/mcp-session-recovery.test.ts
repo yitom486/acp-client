@@ -11,10 +11,10 @@ let connected: boolean
 let events: AcpMcpRecoveryEvent[]
 const sessionId = 'existing-session'
 const servers = [{ name: 'host-tools', command: '/host/mcp', args: ['stdio'], env: [{ name: 'PRIVATE_TOKEN', value: 'never-log-me' }] }]
-const flush = () => vi.advanceTimersByTimeAsync(0)
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const flush = () => delay(0)
 
 beforeEach(() => {
-  vi.useFakeTimers()
   health = new McpConnectionHealth()
   client = {}
   suppressed = false
@@ -33,7 +33,7 @@ beforeEach(() => {
   manager.register({ sessionId, cwd: '/workspace', mcpServers: servers, sessionMeta: { toolsMode: 'ptc', custom: 'host-rules' }, monitor: health })
   health.discovered(client)
 })
-afterEach(() => { manager.reset(); vi.useRealTimers() })
+afterEach(() => { manager.reset() })
 
 describe('AcpMcpSessionRecovery', () => {
   it('leaves healthy, unknown and initially lazy sessions alone', async () => {
@@ -75,9 +75,9 @@ describe('AcpMcpSessionRecovery', () => {
 
   it('does not mistake RPC success for rediscovered tools', async () => {
     health.closed(client)
-    const checked = expect(manager.ensureReady(sessionId)).rejects.toThrow('rediscover')
-    await vi.advanceTimersByTimeAsync(201)
-    await checked
+    const checked = manager.ensureReady(sessionId).catch((error: unknown) => error)
+    await delay(201)
+    expect(await checked).toMatchObject({ message: expect.stringContaining('rediscover') })
     expect(request).toHaveBeenCalledTimes(2)
     expect(suppressed).toBe(false)
   })
@@ -102,10 +102,10 @@ describe('AcpMcpSessionRecovery', () => {
 
   it('cancels discovery waiting', async () => {
     health.closed(client)
-    const checked = expect(manager.ensureReady(sessionId)).rejects.toBeInstanceOf(AcpMcpRecoveryCancelledError)
+    const checked = manager.ensureReady(sessionId).catch((error: unknown) => error)
     await flush()
     manager.cancel(sessionId)
-    await checked
+    expect(await checked).toBeInstanceOf(AcpMcpRecoveryCancelledError)
     expect(suppressed).toBe(false)
     expect(request).toHaveBeenCalledOnce()
   })
@@ -113,20 +113,20 @@ describe('AcpMcpSessionRecovery', () => {
   it('cancels a hanging restore RPC without waiting for its response', async () => {
     health.closed(client)
     request.mockReturnValue(new Promise(() => undefined))
-    const checked = expect(manager.ensureReady(sessionId)).rejects.toBeInstanceOf(AcpMcpRecoveryCancelledError)
+    const checked = manager.ensureReady(sessionId).catch((error: unknown) => error)
     await flush()
     manager.cancel(sessionId)
-    await checked
+    expect(await checked).toBeInstanceOf(AcpMcpRecoveryCancelledError)
     expect(suppressed).toBe(false)
-    expect(vi.getTimerCount()).toBe(0)
+    expect((request.mock.calls[0]?.[2] as AbortSignal).aborted).toBe(true)
   })
 
   it('bounds hanging RPC attempts and exposes a reconnect error', async () => {
     health.closed(client)
     request.mockReturnValue(new Promise(() => undefined))
-    const checked = expect(manager.ensureReady(sessionId)).rejects.toThrow('timed out')
-    await vi.advanceTimersByTimeAsync(401)
-    await checked
+    const checked = manager.ensureReady(sessionId).catch((error: unknown) => error)
+    await delay(401)
+    expect(await checked).toMatchObject({ message: expect.stringContaining('timed out') })
     expect(request).toHaveBeenCalledTimes(2)
   })
 
@@ -145,12 +145,12 @@ describe('AcpMcpSessionRecovery', () => {
     health.closed(client)
     let finish!: (value: unknown) => void
     request.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
-    const checked = expect(manager.ensureReady(sessionId)).rejects.toBeInstanceOf(AcpMcpRecoveryCancelledError)
+    const checked = manager.ensureReady(sessionId).catch((error: unknown) => error)
     await flush()
     manager.reset()
     suppressed = true // Represents the next connection owning replay suppression.
     finish({ sessionId })
-    await checked
+    expect(await checked).toBeInstanceOf(AcpMcpRecoveryCancelledError)
     expect(suppressed).toBe(true)
     expect(events.some((event) => event.type === 'discovered')).toBe(false)
   })

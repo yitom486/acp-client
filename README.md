@@ -161,3 +161,12 @@ SDK 导出 `McpConnectionHealth`（传输/发现观测）与 `AcpMcpSessionRecov
 失败阻止发送；不创建替代会话，不重发 prompt。取消、断连、恢复互斥、RPC 与发现超时统一由 SDK 处理。详见 [API 参考：MCP 恢复](./docs/api-reference.md#mcp-长会话恢复)。
 没有监测信号时不凭空推断 MCP 可用性，也不以恢复 RPC 成功冒充工具可用；工具发现仍不等同于模型目录/工具执行验证。
 此能力属于客户端兜底，不能修复 Agent 自身工作区服务回收后的内部状态。
+
+## 测试入口
+
+本项目统一使用 Vitest。Bun 用于安装依赖及启动 package.json 脚本；直接执行 bun test 会启动 Bun 内置测试器，不是项目测试入口。
+
+```bash
+bun run test       # 全量 Vitest
+bun run test:mcp   # 仅 MCP 恢复与客户端接入测试
+```

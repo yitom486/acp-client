@@ -15,6 +15,12 @@ export interface RestoreOrCreateSessionInput {
   mcpServers?: unknown[]
   /** Runtime-specific native options; not a standard ACP system prompt field. */
   sessionMeta?: Record<string, unknown>
+  /**
+   * Ask the runtime for its code-mode (PTC) presentation on this session.
+   * Callers must gate this on `supportsCodeMode(agentCapabilities, runtimeId)`;
+   * the helper only applies it to new|load|resume requests.
+   */
+  codeMode?: boolean
   /** session/load 回放期间回调（主进程用来压制 UI 更新） */
   onSuppressUpdates?: (suppress: boolean) => void
   /** 测试可设为 0 */
@@ -77,10 +83,13 @@ export async function restoreOrCreateAcpSession(
   const restoreAttempts: AcpSessionRestoreAttempt[] = []
   let mcpServersAccepted = (input.mcpServers ?? []).length > 0
   let nativeSessionAccepted = false
+  const sessionMeta = input.codeMode
+    ? { ...(input.sessionMeta ?? {}), toolsMode: 'ptc' }
+    : input.sessionMeta
   const request = async (method: string, params: Record<string, unknown>) => {
-    if (!input.sessionMeta) return input.request(method, params)
+    if (!sessionMeta) return input.request(method, params)
     try {
-      const result = await input.request(method, { ...params, _meta: input.sessionMeta })
+      const result = await input.request(method, { ...params, _meta: sessionMeta })
       nativeSessionAccepted = true
       return result
     } catch (error) {

@@ -31,6 +31,8 @@
   工具调用审批、权限请求、会话流式更新采用标准的回调与事件驱动，宿主自由决定如何确认（命令行交互 / 桌面弹窗 / Web 消息）。
 - **应用资源目录（单目录接口）**：
   宿主只传 `resources: { directory }`（`AGENTS.md` + `skills/<name>/SKILL.md`），SDK 负责读取、摘要、配置合并、资格/版本门、会话级记录与温复用标签；详见 `docs/api-reference.md §5` 与 `examples/app-resources-demo.ts`。
+- **会话级 Code Mode（PTC）**：
+  Agent 在 `initialize` 声明 `agentCapabilities._meta.toolsMode.values` 后，`createSession({ codeMode: 'on' })` 会通过 `_meta.toolsMode = 'ptc'` 请求该表现层；模型改为写代码、以 `tools.<name>()` 调用全部可见工具（含本次会话挂载的 MCP 工具）。未声明的 Agent 不会被请求，也不会出现“开关无效”的假支持。详见 `docs/api-reference.md §1`。
 
 ---
 

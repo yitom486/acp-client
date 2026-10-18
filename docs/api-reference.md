@@ -45,6 +45,20 @@ const client = new AcpClient(options: AcpClientOptions)
 开启一个新会话或恢复已有会话。
 - `options.resumeSessionId?: string | null`：尝试恢复的会话 ID
 - `options.mcpServers?: unknown[]`：挂载的 MCP 服务器列表
+- `options.codeMode?: 'on' | 'off'`：会话级 Code Mode（PTC），见下
+
+#### 会话级 Code Mode（PTC）
+
+ACP 没有“工具呈现方式”的标准字段。支持的 Agent 在 `initialize` 里声明：
+
+```json
+{ "agentCapabilities": { "_meta": { "toolsMode": { "values": ["native", "ptc"] } } } }
+```
+
+客户端用 `createSession({ codeMode: 'on' })` 选择 `ptc`，SDK 会在 `session/new`、`session/load`、`session/resume` 的 `_meta` 里带上 `{ "toolsMode": "ptc" }`（与资源 meta 合并，冲突时以 code mode 为准）。Agent 收到后只向模型下发 `run_code`，并把该会话可见的全部工具——包括 `mcpServers` 挂载的 MCP 工具——渲染成 `tools.<name>(...)` 的 SDK 声明。
+
+- **能力优先**：`supportsCodeMode(agentCapabilities)` 只读声明；没有声明就没有 code mode，不按运行时 id 猜测。
+- **不支持就忽略**：未声明的运行时不会收到该 `_meta`，也不会看到“勾了却没生效”的开关；想新增支持，按 `docs/adding-an-agent.md` 的“声明 code mode”一节接入。
 
 #### `disconnect(reason?: string): Promise<void>`
 断开当前连接，释放 Stdio 管道并安全杀死后台进程（清理进程树，避免孤儿进程）。

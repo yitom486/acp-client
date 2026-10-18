@@ -380,3 +380,43 @@ it('does not retry a possibly-created native session on transport timeout', asyn
   })).rejects.toThrow('ACP connection closed');
   expect(calls).toBe(1);
 });
+
+it('adds _meta.toolsMode=ptc when codeMode is requested', async () => {
+  const calls: Array<{ rpc: string; params: any }> = [];
+  await restoreOrCreateAcpSession({
+    cwd:'/work',resumeSessionId:null,resumeSupported:false,loadSupported:false,
+    codeMode:true,
+    request:async (rpc,params)=>{calls.push({rpc,params});return {sessionId:'s1'}},log:()=>{},
+  });
+  expect(calls[0].rpc).toBe('session/new');
+  expect(calls[0].params._meta).toEqual({toolsMode:'ptc'});
+});
+
+it('leaves _meta off when codeMode is not requested', async () => {
+  const calls: Array<{ rpc: string; params: any }> = [];
+  await restoreOrCreateAcpSession({
+    cwd:'/work',resumeSessionId:null,resumeSupported:false,loadSupported:false,
+    request:async (rpc,params)=>{calls.push({rpc,params});return {sessionId:'s1'}},log:()=>{},
+  });
+  expect(calls[0].params._meta).toBeUndefined();
+});
+
+it('carries _meta.toolsMode on session/resume', async () => {
+  const calls: Array<{ rpc: string; params: any }> = [];
+  await restoreOrCreateAcpSession({
+    cwd:'/work',resumeSessionId:'s0',resumeSupported:true,loadSupported:false,codeMode:true,
+    request:async (rpc,params)=>{calls.push({rpc,params});return {sessionId:'s0'}},log:()=>{},
+  });
+  expect(calls[0].rpc).toBe('session/resume');
+  expect(calls[0].params._meta).toEqual({toolsMode:'ptc'});
+});
+
+it('carries _meta.toolsMode on session/load', async () => {
+  const calls: Array<{ rpc: string; params: any }> = [];
+  await restoreOrCreateAcpSession({
+    cwd:'/work',resumeSessionId:'s0',resumeSupported:false,loadSupported:true,codeMode:true,
+    request:async (rpc,params)=>{calls.push({rpc,params});return {sessionId:'s0'}},log:()=>{},
+  });
+  expect(calls[0].rpc).toBe('session/load');
+  expect(calls[0].params._meta).toEqual({toolsMode:'ptc'});
+});

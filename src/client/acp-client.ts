@@ -582,7 +582,7 @@ export class AcpClient {
           (!this.sessionConfig || this.runtimeInfo.id === 'agy') && this.resourcesDir && this.resourcePrep?.report.bridgeSupported
             ? this.adapter.appResourceSessionMeta?.(this.resourcesDir) : undefined,
           options?.codeMode,
-          this.runtimeInfo.id,
+          (this.initResponse?.agentCapabilities ?? undefined) as Record<string, unknown> | undefined,
         ),
         log: (level, msg, meta) => {
           this.callbacks.onLog?.(level, msg, meta)

@@ -119,3 +119,17 @@ bunx vitest run packages/acp/src/runtimes/ollama/index.test.ts
 ```
 
 完成！此后任何项目使用 `new AcpClient({ runtime: 'ollama-acp', ... })` 即可开箱即用。
+
+---
+
+## 声明 code mode（PTC）支持
+
+如果运行时能切换“工具呈现方式”（模型改写成代码、以 `tools.<name>()` 调用工具），在 `initialize` 的 `agentCapabilities._meta` 里声明可用值：
+
+```json
+{ "_meta": { "toolsMode": { "values": ["native", "ptc"] } } }
+```
+
+并在 `session/new`、`session/resume` 读取 `params._meta.toolsMode`（`"native"` 为默认，`"ptc"` 表示 code mode）。要让 code mode 覆盖 MCP 工具，把会话挂载的 MCP 工具注册进同一个工具目录，再统一渲染成 SDK 声明——`@yitom/acp-client` 的 `supportsCodeMode` / `mergeSessionMeta` 会按声明协商，不需要改运行时 id。
+
+没有声明的运行时不会被请求 code mode，`createSession({ codeMode: 'on' })` 对它们是无操作。

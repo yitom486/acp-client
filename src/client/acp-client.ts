@@ -1,6 +1,7 @@
 import { closeAcpSessions } from './sdk-client'
 import { createSessionConfigHome, type SessionConfigHome } from '../resources/session-config'
 import { AvailableCommandsCache, type AcpAvailableCommand } from '../session/available-commands'
+import { mergeSessionMeta, type AcpCodeMode } from '../session/code-mode'
 import { QuotaCache } from '../session/quota'
 import type { AcpAgentQuota } from '../contracts'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
@@ -522,6 +523,11 @@ export class AcpClient {
   async createSession(options?: {
     resumeSessionId?: string | null
     mcpServers?: unknown[]
+    /**
+     * 会话级 code mode（PTC）：模型改为写代码、以 `tools.<name>()` 调用全部可见工具，
+     * 包括本次会话挂载的 MCP 工具。仅对声明支持的运行时生效（见 supportsCodeMode）。
+     */
+    codeMode?: AcpCodeMode
   }): Promise<Result<AcpSessionHandle, AppError>> {
     if (!this.sdkConnection?.agent) {
       return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })
@@ -572,8 +578,12 @@ export class AcpClient {
         resumeSupported,
         loadSupported,
         mcpServers,
-        sessionMeta: (!this.sessionConfig || this.runtimeInfo.id === 'agy') && this.resourcesDir && this.resourcePrep?.report.bridgeSupported
-          ? this.adapter.appResourceSessionMeta?.(this.resourcesDir) : undefined,
+        sessionMeta: mergeSessionMeta(
+          (!this.sessionConfig || this.runtimeInfo.id === 'agy') && this.resourcesDir && this.resourcePrep?.report.bridgeSupported
+            ? this.adapter.appResourceSessionMeta?.(this.resourcesDir) : undefined,
+          options?.codeMode,
+          this.runtimeInfo.id,
+        ),
         log: (level, msg, meta) => {
           this.callbacks.onLog?.(level, msg, meta)
         },

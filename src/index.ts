@@ -46,6 +46,7 @@ export * from "./auth/connect-auth-gate";
 
 // ── 会话 ──
 export * from "./session/agent-registry";
+export * from "./session/code-mode";
 export * from "./session/config-options";
 export * from "./session/session-capabilities";
 export * from "./session/available-commands";

@@ -225,3 +225,50 @@ const client = new AcpClient({
 复跑：`bun scripts/smoke-opencode-resources.mjs <opencode-1.x-path> --session-config`。真实 ACP/本地 mock 模型验证 system 规则、零兼容前缀、MCP 与原生 skill，并检查断开后临时配置根已删除。默认不带参数继续验证原有 overlay 路径。
 
 Antigravity bridge 0.1.24 / 0.1.25 / 0.1.26 supports `resources.directory` through `_meta.appResources.directory` and private temporary additional workspaces. Rules and Skills are session-scoped, without changing cwd or global authentication. Unknown bridge versions retain compatibility delivery. Orderly close/delete/shutdown remove bridge-owned resources; forced termination cannot guarantee cleanup.
+
+## MCP 长会话恢复
+
+### 公共客户端接入
+
+`createSession` 新增可选 `mcpHealth: AcpMcpHealthMonitor`。由宿主掌握 MCP 连接的项目可以使用内置监测器：
+
+```ts
+import { AcpClient, McpConnectionHealth } from '@yitom/acp-client'
+
+const health = new McpConnectionHealth()
+const client = new AcpClient({ workspaceRoot: process.cwd() })
+await client.connect()
+const opened = await client.createSession({ mcpServers, mcpHealth: health })
+// 在宿主 MCP 服务中：成功响应 tools/list 后 health.discovered(connectionKey)
+// 同一连接关闭时：health.closed(connectionKey)
+if (opened.ok) {
+  await opened.value.prompt('继续读取')
+  // 同时取消恢复等待及 Agent 的当前回答：
+  // await opened.value.cancel()
+}
+```
+
+`connectionKey` 是宿主的连接对象或稳定的对象标识；discovered 与 closed 必须使用同一对象。无效鉴权连接关闭不应调用 discovered。
+也可实现 `AcpMcpHealthMonitor`：只读 discoveries / disconnects 计数、hasDiscoveredClient 与 waitForDiscovery(after, signal, timeoutMs)。
+不提供监测器的调用方保持原有 prompt 路径；SDK 无法仅凭 ACP 会话连接状态知道 Agent 内部 MCP 是否仍挂载。
+
+### 通用管理器
+
+自管 ACP 接线的宿主使用 `AcpMcpSessionRecovery`：
+
+- 每个独立连接 owner 创建一个管理器，注入 request、getCapabilities、isConnected；可提供 isBusy、onSuppressUpdates、onEvent 以及 requestTimeoutMs / discoveryTimeoutMs。
+- 新建/加载/恢复成功后 register({ sessionId, cwd, mcpServers, sessionMeta, monitor })，保存描述符快照及当前断连序号。
+- 每次真正发送 prompt 前 await ensureReady(sessionId)。发现绑定后的连接关闭则仅尝试同一会话 resume→load，不调用 session/new，不重发用户消息。
+- 每次恢复 RPC 默认限时 120 秒，工具发现默认限时 10 秒；RPC 的可选第三参 AbortSignal 可透传给底层 ACP cancellationSignal。取消会释放本地等待，即使调用方未实现远端取消。
+- 成功必须观察到本次尝试之后新的 tools/list 且存在存活连接；仅 RPC 成功不会清除断连标记。新绑定的懒启动会话不受旧连接断开影响。
+- 同会话并发恢复合并；其他会话在恢复期间拒绝发送，避免历史回放压制吞掉正常回复。宿主应在恢复期间阻止新建/加载会话，可检查 isRecovering。
+- cancel(sessionId) 取消该会话恢复；reset() 用于连接销毁/切换，撤销旧绑定与待决恢复。客户端门面 disconnect() 自动执行 reset。
+- 恢复期间 onSuppressUpdates(true/false) 用于隔离历史回放；onEvent 只含类型、会话 ID 与方法名，不含环境、令牌、工具参数或输出。
+
+工具发现是宿主可观测证据，不保证 Agent 的模型侧工具目录正确，更不表示工具已执行。保持同一恢复会话 ID 和 PTC 元数据是强约束；Agent 改变会话 ID 或拒绝原 PTC 模式时立即失败。
+
+### 新建会话重试策略
+
+`restoreOrCreateAcpSession` 默认保留相同 MCP 描述符重试一次；第二次仍失败抛首次错误。禁止默认静默移除工具。
+只有明确允许无工具会话的调用方才设置 `preserveMcpOnRetry: false`，此时返回 `mcpServersAccepted: false`。
+`requestSessionWithResources` 拒绝原生扩展时只去掉扩展、保留 MCP；`isAuthenticationRequired` 不把 MCP 认证失败误报成 Agent 登录失败。

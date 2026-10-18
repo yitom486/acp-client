@@ -1,5 +1,6 @@
+import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSessionConfigHome } from './session-config'
@@ -29,12 +30,12 @@ describe('child-only native config homes', () => {
       expect(readFileSync(join(nativeDir,'skills','demo','note.md'),'utf8')).toBe('REFERENCE')
       expect(existsSync(join(nativeDir,'skills','demo','auth.json'))).toBe(false)
       await profile.dispose();expect(existsSync(profile.directory)).toBe(false)
-    } finally {await profile?.dispose();rmSync(dir,{recursive:true,force:true})}
+    } finally {await profile?.dispose();await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100})}
   })
   it('does not invent configuration environment variables for unsupported runtimes',async()=>{
     const dir=resources()
     try {for(const runtime of ['deepseek','unknown']) await expect(createSessionConfigHome(runtime,dir)).rejects.toThrow('not verified')}
-    finally {rmSync(dir,{recursive:true,force:true})}
+    finally {await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100})}
   })
   it('separate SDK clients receive distinct homes and clean them on disconnect',async()=>{
     const dir=resources();const clients:AcpClient[]=[];const paths:string[]=[]
@@ -43,7 +44,7 @@ describe('child-only native config homes', () => {
     process.env.CLAUDE_CONFIG_DIR=userConfig
     try {
       for(let i=0;i<2;i++) {
-        const c=new AcpClient({runtime:{id:'claude',name:'mock',description:'no model',command:process.execPath,args:[join(import.meta.dir,'fixtures/compat-agent.mjs')],requiredEnvKeys:[]},workspaceRoot:dir,dataDir:dir,resources:{directory:dir,configurationScope:'session'}})
+        const c=new AcpClient({runtime:{id:'claude',name:'mock',description:'no model',command:process.execPath,args:[join(import.meta.dirname,'fixtures/compat-agent.mjs')],requiredEnvKeys:[]},workspaceRoot:dir,dataDir:dir,resources:{directory:dir,configurationScope:'session'}})
         clients.push(c);expect((await c.connect()).ok).toBe(true)
         const opened=await c.createSession();expect(opened.ok).toBe(true);if(!opened.ok)throw Error('session')
         const root=opened.value.resourceReport?.configurationDirectory!;paths.push(root)
@@ -54,7 +55,7 @@ describe('child-only native config homes', () => {
       expect(paths[0]).not.toBe(paths[1]);await clients[0]!.disconnect()
       expect(existsSync(paths[0]!)).toBe(false);expect(existsSync(paths[1]!)).toBe(true)
       expect(process.env.CLAUDE_CONFIG_DIR).toBe(userConfig);expect(readFileSync(join(userConfig,'CLAUDE.md'),'utf8')).toBe('USER_UNTOUCHED')
-    } finally {await Promise.all(clients.map(c=>c.disconnect()));if(previous===undefined)delete process.env.CLAUDE_CONFIG_DIR;else process.env.CLAUDE_CONFIG_DIR=previous;rmSync(dir,{recursive:true,force:true})}
+    } finally {await Promise.all(clients.map(c=>c.disconnect()));if(previous===undefined)delete process.env.CLAUDE_CONFIG_DIR;else process.env.CLAUDE_CONFIG_DIR=previous;await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100})}
   }, 20000)
 })
 
@@ -65,13 +66,13 @@ describe('isolated lifecycle failures',()=>{
   });
   it('cleans configuration after handshake failure',async()=>{
     const dir=resources();let configDir='';
-    const c=new AcpClient({runtime:{id:'claude',name:'mock',description:'no model',command:process.execPath,args:[join(import.meta.dir,'fixtures/compat-agent.mjs')],requiredEnvKeys:[]},workspaceRoot:dir,dataDir:dir,env:{MOCK_FAIL_INITIALIZE:'1'},resources:{directory:dir,configurationScope:'session'},callbacks:{onStderrLine:line=>{if(line.startsWith('TEST_CONFIG_DIR:'))configDir=line.slice('TEST_CONFIG_DIR:'.length)}}});
+    const c=new AcpClient({runtime:{id:'claude',name:'mock',description:'no model',command:process.execPath,args:[join(import.meta.dirname,'fixtures/compat-agent.mjs')],requiredEnvKeys:[]},workspaceRoot:dir,dataDir:dir,env:{MOCK_FAIL_INITIALIZE:'1'},resources:{directory:dir,configurationScope:'session'},callbacks:{onStderrLine:line=>{if(line.startsWith('TEST_CONFIG_DIR:'))configDir=line.slice('TEST_CONFIG_DIR:'.length)}}});
     try {expect((await c.connect()).ok).toBe(false);expect(configDir).not.toBe('');expect(existsSync(configDir)).toBe(false)}
-    finally{await c.disconnect();rmSync(dir,{recursive:true,force:true})}
+    finally{await c.disconnect();await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100})}
   },20000);
   it('does not create two profiles for concurrent connect calls',async()=>{
-    const dir=resources();const c=new AcpClient({runtime:{id:'claude',name:'mock',description:'no model',command:process.execPath,args:[join(import.meta.dir,'fixtures/compat-agent.mjs')],requiredEnvKeys:[]},workspaceRoot:dir,dataDir:dir,resources:{directory:dir,configurationScope:'session'}});
+    const dir=resources();const c=new AcpClient({runtime:{id:'claude',name:'mock',description:'no model',command:process.execPath,args:[join(import.meta.dirname,'fixtures/compat-agent.mjs')],requiredEnvKeys:[]},workspaceRoot:dir,dataDir:dir,resources:{directory:dir,configurationScope:'session'}});
     try {const results=await Promise.all([c.connect(),c.connect()]);expect(results.filter(r=>r.ok)).toHaveLength(1);expect(c.isConnected).toBe(true)}
-    finally{await c.disconnect();rmSync(dir,{recursive:true,force:true})}
+    finally{await c.disconnect();await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100})}
   },20000);
 });

@@ -30,7 +30,7 @@ jobs:
         run: bun install
 
       - name: Run Unit Tests
-        run: bun test
+        run: bun run test
 
       - name: Build distribution
         run: bun run build

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,14 +12,14 @@ const clients: AcpClient[] = [];
 afterEach(async () => { for (const c of clients.splice(0)) await c.disconnect(); for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 function resourceDir() { const d = mkdtempSync(join(tmpdir(), 'acp-review-')); dirs.push(d); writeFileSync(join(d, 'AGENTS.md'), 'HOST_RULES'); return d; }
 function client(directory: string, version = '2.2.2') {
-  const c = new AcpClient({ runtime: { id: 'codex-acp', name: 'review', description: 'no model fixture', command: process.execPath, args: [join(import.meta.dir, 'fixtures/review-agent.mjs')], requiredEnvKeys: [] }, workspaceRoot: process.cwd(), dataDir: directory, env: { CODEX_HOME: directory, CODEX_CONFIG: JSON.stringify({ developer_instructions: 'EXTRA_ENV_USER' }), REVIEW_BRIDGE_VERSION: version }, resources: { directory } });
+  const c = new AcpClient({ runtime: { id: 'codex-acp', name: 'review', description: 'no model fixture', command: process.execPath, args: [join(import.meta.dirname, 'fixtures/review-agent.mjs')], requiredEnvKeys: [] }, workspaceRoot: process.cwd(), dataDir: directory, env: { CODEX_HOME: directory, CODEX_CONFIG: JSON.stringify({ developer_instructions: 'EXTRA_ENV_USER' }), REVIEW_BRIDGE_VERSION: version }, resources: { directory } });
   clients.push(c); return c;
 }
 describe('SDK resource review regressions', () => {
   it('TOML 合并保留真实顶层位置与其他表，复杂规则拒绝改写', () => {
     const args = { managedTopKeys: ['model'], managedTables: ['provider.mine'], replacementBlock: 'model = "new"\n[provider.mine]\nname = "fresh"' };
     const text = mergeConfigTomlPreserving({ ...args, existingText: 'model = "old"\n[other]\nvalue = 1' });
-    const parsed = Bun.TOML.parse(text) as any;
+    const parsed = JSON.parse(execFileSync('bun', ['-e', 'process.stdout.write(JSON.stringify(Bun.TOML.parse(await Bun.stdin.text())))'], { input: text, encoding: 'utf8', windowsHide: true }));
     expect(parsed.model).toBe('new'); expect(parsed.other.value).toBe(1); expect(parsed.other.model).toBeUndefined();
     expect(() => mergeConfigTomlPreserving({ ...args, existingText: 'developer_instructions = """\n[other]\n"""' })).toThrow();
   });

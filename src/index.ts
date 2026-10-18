@@ -61,3 +61,6 @@ export * from "./session/quota";
 export * from "./resources/runtime-bindings";
 
 export * from "./resources/session-config";
+
+export * from "./client/mcp-session-recovery";
+export * from "./mcp/connection-health";

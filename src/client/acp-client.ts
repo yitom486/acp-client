@@ -1,3 +1,5 @@
+import { AcpMcpSessionRecovery, AcpMcpRecoveryCancelledError } from './mcp-session-recovery'
+import type { AcpMcpHealthMonitor } from '../mcp/connection-health'
 import { closeAcpSessions } from './sdk-client'
 import { createSessionConfigHome, type SessionConfigHome } from '../resources/session-config'
 import { AvailableCommandsCache, type AcpAvailableCommand } from '../session/available-commands'
@@ -131,6 +133,9 @@ export class AcpSessionHandle {
     return this.client.getAvailableCommands(this.sessionId)
   }
 
+  /** Cancel an in-flight prompt or MCP recovery. */
+  cancel(): Promise<Result<void, AppError>> { return this.client.cancelSession(this.sessionId) }
+
   /** 修改会话配置项（如模型 ID、模式等） */
   async setConfigOption(configId: string, value: string | boolean): Promise<Result<unknown, AppError>> {
     return this.client.setSessionConfigOption(this.sessionId, configId, value)
@@ -145,6 +150,8 @@ export class AcpSessionHandle {
  * - 可在任意 Node.js 项目、CLI 命令行工具或 Web 服务中直接复用。
  */
 export class AcpClient {
+  private readonly mcpRecovery: AcpMcpSessionRecovery
+  private suppressRecoveryUpdates = false
   private status: AcpConnectionStatus = 'disconnected'
   private readonly commandsCache = new AvailableCommandsCache()
   private readonly quotaCache = new QuotaCache()
@@ -209,6 +216,20 @@ export class AcpClient {
     this.resourcesDir = options.resources?.directory ?? null
     this.attachSkillsMcp = options.resources?.attachSkillsMcp !== false
     this.callbacks = options.callbacks ?? {}
+    this.mcpRecovery = new AcpMcpSessionRecovery({
+      request: (method, params, signal) => {
+        if (!this.sdkConnection?.agent) throw new AcpMcpRecoveryCancelledError('ACP connection closed')
+        return this.sdkConnection.agent.request(method, params, { cancellationSignal: signal })
+      },
+      getCapabilities: () => ({
+        resume: Boolean(this.initResponse && parseResumeSessionSupported(this.initResponse.agentCapabilities as any)),
+        load: Boolean(this.initResponse && parseLoadSessionSupported(this.initResponse.agentCapabilities as any)),
+      }),
+      isConnected: () => this.isConnected,
+      isBusy: (sessionId) => [...this.inflightPrompts].some((id) => id !== sessionId),
+      onSuppressUpdates: (suppress) => { this.suppressRecoveryUpdates = suppress },
+      onEvent: (event) => this.callbacks.onLog?.('info', 'mcp.recovery.' + event.type, { sessionId: event.sessionId, method: event.method }),
+    })
 
     const runtimeId =
       typeof options.runtime === 'string'
@@ -260,6 +281,7 @@ export class AcpClient {
     // 至 disconnect（会话随进程消亡，重连后旧 id 按新代次重新评估）。
     if (this.currentStatus === 'connecting') return err({code:'ACP_PROTOCOL_ERROR',message:'Agent 正在连接'})
     this.connectionGen += 1
+    this.mcpRecovery.reset()
     const connectGen=this.connectionGen
     try {
       this.setStatus('connecting')
@@ -426,7 +448,7 @@ export class AcpClient {
           // after session/new|load|resume returns).
           this.commandsCache.observe(params)
           this.quotaCache.observe(params, this.runtimeInfo.id)
-          this.callbacks.onSessionUpdate?.(params)
+          if (!this.suppressRecoveryUpdates) this.callbacks.onSessionUpdate?.(params)
         },
       }
 
@@ -523,6 +545,8 @@ export class AcpClient {
   async createSession(options?: {
     resumeSessionId?: string | null
     mcpServers?: unknown[]
+    /** Host MCP discovery/close observations enable automatic recovery before prompts. */
+    mcpHealth?: AcpMcpHealthMonitor
     /**
      * 会话级 code mode（PTC）：模型改为写代码、以 `tools.<name>()` 调用全部可见工具，
      * 包括本次会话挂载的 MCP 工具。仅对声明支持的运行时生效（见 supportsCodeMode）。
@@ -534,7 +558,9 @@ export class AcpClient {
     }
 
     const agent = this.sdkConnection.agent
+    const generation = this.connectionGen
     const init = this.initResponse
+    if (this.mcpRecovery.isRecovering) return err({ code: 'ACP_PROTOCOL_ERROR', message: 'Wait for MCP recovery before opening another session' })
 
     const resumeSupported = Boolean(
       init && parseResumeSessionSupported(init.agentCapabilities as any),
@@ -569,6 +595,12 @@ export class AcpClient {
           })
         }
       }
+      const sessionMeta = mergeSessionMeta(
+        (!this.sessionConfig || this.runtimeInfo.id === 'agy') && this.resourcesDir && this.resourcePrep?.report.bridgeSupported
+          ? this.adapter.appResourceSessionMeta?.(this.resourcesDir) : undefined,
+        options?.codeMode,
+        (this.initResponse?.agentCapabilities ?? undefined) as Record<string, unknown> | undefined,
+      )
       const openResult = await restoreOrCreateAcpSession({
         request: async (method, params) => {
           return sdkRequest(agent, method, params)
@@ -578,18 +610,22 @@ export class AcpClient {
         resumeSupported,
         loadSupported,
         mcpServers,
-        sessionMeta: mergeSessionMeta(
-          (!this.sessionConfig || this.runtimeInfo.id === 'agy') && this.resourcesDir && this.resourcePrep?.report.bridgeSupported
-            ? this.adapter.appResourceSessionMeta?.(this.resourcesDir) : undefined,
-          options?.codeMode,
-          (this.initResponse?.agentCapabilities ?? undefined) as Record<string, unknown> | undefined,
-        ),
+        sessionMeta,
+        preserveMcpOnRetry: true,
         log: (level, msg, meta) => {
           this.callbacks.onLog?.(level, msg, meta)
         },
       })
 
+      if (generation !== this.connectionGen || !this.isConnected) return err({ code: 'CANCELLED', message: 'Connection changed while opening session' })
       if (!openResult.mcpServersAccepted) skillsExposed = 'none'
+      if (options?.mcpHealth && mcpServers.length) this.mcpRecovery.register({
+        sessionId: openResult.sessionId,
+        cwd: this.workspaceRoot,
+        mcpServers,
+        sessionMeta: openResult.nativeSessionAccepted ? sessionMeta : undefined,
+        monitor: options.mcpHealth,
+      })
       this.sessionLedger.set(openResult.sessionId, {
         restoreMethod: openResult.restoreMethod,
         gen: this.connectionGen,
@@ -629,8 +665,14 @@ export class AcpClient {
       return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })
     }
 
+    if (!this.isConnected) return err({ code: 'ACP_NOT_CONNECTED', message: 'Agent is not connected' })
+    if (this.inflightPrompts.has(sessionId)) return err({ code: 'ACP_PROTOCOL_ERROR', message: 'Session already has an in-flight prompt' })
+    const generation = this.connectionGen
+    const agent = this.sdkConnection.agent
     this.inflightPrompts.add(sessionId)
     try {
+      await this.mcpRecovery.ensureReady(sessionId)
+      if (generation !== this.connectionGen || !this.isConnected) throw new AcpMcpRecoveryCancelledError('ACP connection changed')
       const prompt: Array<Record<string, unknown>> = [{ type: 'text', text: promptText }]
       for (const image of options?.images ?? []) {
         if (!image?.data || !image?.mimeType) continue
@@ -641,7 +683,7 @@ export class AcpClient {
       const compat = this.buildCompatPrepend(sessionId)
       const blocks = compat ? [{ type: 'text', text: compat }, ...prompt] : prompt
       const response = await sdkRequest(
-        this.sdkConnection.agent,
+        agent,
         methods.agent.session.prompt,
         {
           sessionId,
@@ -652,9 +694,9 @@ export class AcpClient {
       return ok(response)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      return err({ code: 'ACP_PROTOCOL_ERROR', message })
+      return err({ code: e instanceof AcpMcpRecoveryCancelledError ? 'CANCELLED' : 'ACP_PROTOCOL_ERROR', message })
     } finally {
-      this.inflightPrompts.delete(sessionId)
+      if (generation === this.connectionGen) this.inflightPrompts.delete(sessionId)
     }
   }
 
@@ -697,6 +739,18 @@ export class AcpClient {
     return text
   }
 
+  /** Cancel recovery before notifying the agent; prompts are never automatically replayed. */
+  async cancelSession(sessionId: string): Promise<Result<void, AppError>> {
+    this.mcpRecovery.cancel(sessionId)
+    if (!this.sdkConnection?.agent) return err({ code: 'ACP_NOT_CONNECTED', message: 'Agent is not connected' })
+    try {
+      await this.sdkConnection.agent.notify(methods.agent.session.cancel, { sessionId })
+      return ok(undefined)
+    } catch (error) {
+      return err({ code: 'ACP_PROTOCOL_ERROR', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   /** 动态更新会话配置项（如模型 ID） */
   async setSessionConfigOption(
     sessionId: string,
@@ -722,6 +776,9 @@ export class AcpClient {
 
   /** 断开连接并清理资源 */
   async disconnect(reason?: string): Promise<void> {
+    ++this.connectionGen
+    this.mcpRecovery.reset()
+    this.inflightPrompts.clear()
     this.setStatus('disconnected', reason)
     this.resourcePrep = null
     const capabilities = this.initResponse?.agentCapabilities?.sessionCapabilities as Record<string, unknown> | undefined

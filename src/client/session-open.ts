@@ -13,6 +13,8 @@ export interface RestoreOrCreateSessionInput {
   loadSupported: boolean
   /** 客户端自带的 MCP server（Inkdown 工具）；Agent 不支持 HTTP 传输时传空数组 */
   mcpServers?: unknown[]
+  /** Default true: never silently remove tools after a failed session/new. */
+  preserveMcpOnRetry?: boolean
   /** Runtime-specific native options; not a standard ACP system prompt field. */
   sessionMeta?: Record<string, unknown>
   /**
@@ -31,6 +33,7 @@ export interface RestoreOrCreateSessionInput {
 export interface RestoreOrCreateSessionResult {
   /** Agent accepted the supplied MCP descriptors; not proof of tool execution. */
   mcpServersAccepted: boolean
+  recoveredToolOutputs?: Array<{ toolCallId: string; text: string }>
   nativeSessionAccepted: boolean
   sessionId: string
   configOptions: unknown
@@ -38,6 +41,10 @@ export interface RestoreOrCreateSessionResult {
   sessionRestored: boolean
   requestedSessionId?: string
   restoreAttempts: AcpSessionRestoreAttempt[]
+}
+
+export function isAuthenticationRequired(message: string): boolean {
+  return !/\bmcp\b/i.test(message) && /authentication required|not authenticated|please (?:log|sign) in|需要认证|尚未认证/i.test(message)
 }
 
 function errorMessage(error: unknown): string {
@@ -86,23 +93,21 @@ export async function restoreOrCreateAcpSession(
   const sessionMeta = input.codeMode
     ? { ...(input.sessionMeta ?? {}), toolsMode: 'ptc' }
     : input.sessionMeta
+  let recoveredToolOutputs: RestoreOrCreateSessionResult['recoveredToolOutputs']
   const request = async (method: string, params: Record<string, unknown>) => {
-    if (!sessionMeta) return input.request(method, params)
-    try {
-      const result = await input.request(method, { ...params, _meta: sessionMeta })
-      nativeSessionAccepted = true
-      return result
-    } catch (error) {
-      // An ambiguous transport failure may already have created a session. Do not create another.
-      const rejected = error instanceof RequestError && error.code === -32602
-        || /native.*meta.*reject|unsupported.*(meta|systemPrompt)|unknown.*(meta|systemPrompt)/i.test(errorMessage(error))
-      if (!rejected || isTransientAcpTransportError(error)) throw error
-      log('warn', 'native resource options failed; retry without extension')
-      // Keep MCP registration when the runtime rejects only its native extension.
-      const result = await input.request(method, params)
-      nativeSessionAccepted = false
-      return result
-    }
+    const opened = await requestSessionWithResources(input.request, method, params, sessionMeta)
+    nativeSessionAccepted = opened.nativeSessionAccepted
+    const meta = opened.result._meta as { toolOutputRecovery?: { outputs?: unknown } } | undefined
+    const outputs = meta?.toolOutputRecovery?.outputs
+    let total = 0
+    recoveredToolOutputs = Array.isArray(outputs) ? outputs.slice(0, 20).flatMap((row) => {
+      if (!row || typeof row.toolCallId !== 'string' || row.toolCallId.length > 120 || typeof row.text !== 'string') return []
+      const bytes = Buffer.byteLength(row.text)
+      if (bytes > 128 * 1024 || total + bytes > 256 * 1024) return []
+      total += bytes
+      return [{ toolCallId: row.toolCallId, text: row.text }]
+    }) : undefined
+    return opened.result
   }
   const delayMs = input.retryDelayMs ?? 250
   const log =
@@ -163,7 +168,7 @@ export async function restoreOrCreateAcpSession(
     loadSupported: input.loadSupported,
   })
 
-  // session/new 共用 helper：首次失败时裸调（mcpServers: []）重试一次；
+  // session/new 默认保留相同 MCP 配置重试；只有显式 opt-out 才允许移除工具。
   // 成功则继续，仍失败抛原错（首次错误为准，便于 UI 显示真实原因）。
   const requestSessionNew = async (): Promise<Record<string, unknown>> => {
     const baseParams = {
@@ -173,17 +178,20 @@ export async function restoreOrCreateAcpSession(
     try {
       return (await request('session/new', baseParams)) as Record<string, unknown>
     } catch (firstError) {
+      // A transport failure may arrive after session creation; avoid creating a duplicate.
+      if (isTransientAcpTransportError(firstError)) throw firstError
       // 已是裸调则无重试意义，直接抛
       if ((input.mcpServers ?? []).length === 0) throw firstError
-      log('warn', 'session/new failed, retry without mcpServers', {
+      const preserve = input.preserveMcpOnRetry !== false
+      log('warn', preserve ? 'session/new failed, retry with mcpServers' : 'session/new failed, retry without mcpServers', {
         error: errorMessage(firstError),
       })
       try {
         const result = (await request('session/new', {
           cwd: input.cwd,
-          mcpServers: [],
+          mcpServers: preserve ? input.mcpServers ?? [] : [],
         })) as Record<string, unknown>
-        mcpServersAccepted = false
+        mcpServersAccepted = preserve
         return result
       } catch {
         throw firstError
@@ -203,6 +211,7 @@ export async function restoreOrCreateAcpSession(
         configOptions: withModelsFallback(resumed),
         restoreMethod: 'resume',
         sessionRestored: true,
+        recoveredToolOutputs,
         mcpServersAccepted,
         nativeSessionAccepted,
         requestedSessionId: resumeId,
@@ -224,6 +233,7 @@ export async function restoreOrCreateAcpSession(
           configOptions: withModelsFallback(loaded),
           restoreMethod: 'load',
           sessionRestored: true,
+        recoveredToolOutputs,
           mcpServersAccepted,
           nativeSessionAccepted,
           requestedSessionId: resumeId,
@@ -254,5 +264,23 @@ export async function restoreOrCreateAcpSession(
     nativeSessionAccepted,
     requestedSessionId: resumeId ?? undefined,
     restoreAttempts,
+  }
+}
+
+/** Retry rejected native extensions without changing the MCP descriptors. */
+export async function requestSessionWithResources(
+  request: AcpRpcRequest,
+  method: string,
+  params: Record<string, unknown>,
+  sessionMeta?: Record<string, unknown>,
+): Promise<{ result: Record<string, unknown>; nativeSessionAccepted: boolean }> {
+  if (!sessionMeta) return { result: await request(method, params) as Record<string, unknown>, nativeSessionAccepted: false }
+  try {
+    return { result: await request(method, { ...params, _meta: sessionMeta }) as Record<string, unknown>, nativeSessionAccepted: true }
+  } catch (error) {
+    const rejected = error instanceof RequestError && error.code === -32602
+      || /native.*meta.*reject|unsupported.*(meta|systemPrompt)|unknown.*(meta|systemPrompt)/i.test(errorMessage(error))
+    if (!rejected || isTransientAcpTransportError(error)) throw error
+    return { result: await request(method, params) as Record<string, unknown>, nativeSessionAccepted: false }
   }
 }

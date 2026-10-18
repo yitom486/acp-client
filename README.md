@@ -26,7 +26,7 @@
 - **生命周期全托管**：
   负责跨平台后台进程拉起（Windows PID 级联杀进程）、Stdio ndJson 传输桥接、协议初始化（Initialize 握手）、温进程池长驻复用、错误诊断（stderr 尾部日志聚合）。
 - **会话状态机与容错**：
-  自动处理 `resume` → `load` → `new` 会话恢复流程，处理模型方言（models 数组/对象）、无 MCP 自动降级与网络抖动重试。
+  自动处理 `resume` → `load` → `new` 会话恢复流程，处理模型方言（models 数组/对象）、默认保留 MCP 配置重试；提供健康监测后，在下一轮 prompt 前恢复失效的工具挂载。
 - **解耦的事件钩子与审批**：
   工具调用审批、权限请求、会话流式更新采用标准的回调与事件驱动，宿主自由决定如何确认（命令行交互 / 桌面弹窗 / Web 消息）。
 - **应用资源目录（单目录接口）**：
@@ -153,3 +153,11 @@ bun run packages/acp/examples/standalone-acp-demo.ts
 With `@yitom/agy-acp-map` 0.1.24 / 0.1.25 / 0.1.26, `resources.directory` is delivered through the bridge session extension `_meta.appResources.directory`. Rules, native Skills and session MCP live in a private temporary additional workspace; cwd, global configuration and authentication remain unchanged. Close/delete/orderly shutdown remove the temporary workspace. Unknown bridge versions keep compatibility guidance and the app-skills MCP fallback. This extension is bridge-specific, not a standard ACP configuration-home API. `configurationScope: "session"` also supports agy; its configuration report remains conservative until the bridge accepts the session extension.
 
 Normal disconnect closes owned sessions on agents advertising `sessionCapabilities.close` before terminating the transport/process. Requests are bounded to two seconds; failures are logged and teardown continues. This permits session resource cleanup on Windows as well.
+
+## MCP 长会话恢复
+
+SDK 导出 `McpConnectionHealth`（传输/发现观测）与 `AcpMcpSessionRecovery`（通用恢复管理器），不依赖 Electron、窗口、管道或应用名称。
+宿主把 MCP 工具发现和连接关闭通知给监测器，并通过 `createSession({ mcpServers, mcpHealth })` 绑定；随后 `AcpClient.promptSession()` / 会话 `prompt()` 会在已知断连后先恢复原会话、重新下发相同 MCP 配置并等待新的工具发现，再发送本轮消息。
+失败阻止发送；不创建替代会话，不重发 prompt。取消、断连、恢复互斥、RPC 与发现超时统一由 SDK 处理。详见 [API 参考：MCP 恢复](./docs/api-reference.md#mcp-长会话恢复)。
+没有监测信号时不凭空推断 MCP 可用性，也不以恢复 RPC 成功冒充工具可用；工具发现仍不等同于模型目录/工具执行验证。
+此能力属于客户端兜底，不能修复 Agent 自身工作区服务回收后的内部状态。

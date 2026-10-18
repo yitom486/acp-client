@@ -2,6 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest'
 import { agent, client, methods, RequestError } from '@agentclientprotocol/sdk'
 import {
   isTransientAcpTransportError,
+  isAuthenticationRequired,
   restoreOrCreateAcpSession,
 } from './session-open'
 
@@ -15,6 +16,45 @@ afterEach(() => {
       // 忽略竞态关闭
     }
   }
+})
+
+it('only removes MCP on an explicit opt-out and reports the downgrade', async () => {
+  const calls: Array<Record<string, unknown>> = []
+  const result = await restoreOrCreateAcpSession({
+    request: async (_method, params) => {
+      calls.push(params as Record<string, unknown>)
+      if (calls.length === 1) throw new Error('mount rejected')
+      return { sessionId: 'explicitly-toolless' }
+    },
+    cwd: '/workspace', resumeSessionId: null, resumeSupported: false, loadSupported: false,
+    mcpServers: [{ name: 'host' }], preserveMcpOnRetry: false, log: () => undefined,
+  })
+  expect(calls[1]?.mcpServers).toEqual([])
+  expect(result.mcpServersAccepted).toBe(false)
+})
+
+it('does not duplicate session/new after an ambiguous transport failure with MCP', async () => {
+  let calls = 0
+  await expect(restoreOrCreateAcpSession({
+    request: async () => { ++calls; throw new Error('ACP connection closed') },
+    cwd: '/workspace', resumeSessionId: null, resumeSupported: false, loadSupported: false,
+    mcpServers: [{ name: 'host' }], log: () => undefined,
+  })).rejects.toThrow('connection closed')
+  expect(calls).toBe(1)
+})
+
+it('bounds optional recovered tool outputs without accepting arbitrary fields', async () => {
+  const result = await restoreOrCreateAcpSession({
+    request: async () => ({ sessionId: 'old', _meta: { toolOutputRecovery: { outputs: [
+      { toolCallId: 'too-big', text: 'x'.repeat(128 * 1024 + 1) },
+      { toolCallId: 'valid', text: 'kept', extra: 'discard' },
+      { toolCallId: 123, text: 'invalid id' },
+    ] } } }),
+    cwd: '/workspace', resumeSessionId: 'old', resumeSupported: true, loadSupported: false, log: () => undefined,
+  })
+  expect(result.recoveredToolOutputs).toEqual([{ toolCallId: 'valid', text: 'kept' }])
+  expect(isAuthenticationRequired('MCP authentication required')).toBe(false)
+  expect(isAuthenticationRequired('Authentication required')).toBe(true)
 })
 
 /**
@@ -204,7 +244,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
     expect(seen[0]).toMatchObject({ sessionId: 'old-9', cwd: '/ws' })
   })
 
-  it('session/new 失败时裸调（mcpServers: []）重试一次，成功则继续', async () => {
+  it('session/new 默认保留 MCP 配置重试一次，成功则继续', async () => {
     const seen: unknown[] = []
     let calls = 0
     const result = await restoreOrCreateAcpSession({
@@ -226,14 +266,14 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
       log: () => undefined,
     })
 
-    expect(result.mcpServersAccepted).toBe(false)
+    expect(result.mcpServersAccepted).toBe(true)
     expect(result.sessionId).toBe('n2')
     expect(result.restoreMethod).toBe('new')
     expect(calls).toBe(2)
-    expect(seen[1]).toMatchObject({ mcpServers: [] })
+    expect(seen[1]).toMatchObject({ mcpServers: [{ name: 'inkdown' }] })
   })
 
-  it('session/new 裸调仍失败时返回原错（首次错误为准）', async () => {
+  it('session/new 保留 MCP 重试仍失败时返回原错', async () => {
     const first = new Error('first boom')
     let calls = 0
     await expect(
@@ -258,7 +298,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
     expect(calls).toBe(2)
   })
 
-  it('恢复建新同样走 MCP 裸调重试（resume 失败 → new 首次失败 → 裸调成功）', async () => {
+  it('恢复建新同样保留 MCP 配置重试', async () => {
     let newCalls = 0
     const seenNewParams: unknown[] = []
     const sdk = setupSdkRequest({
@@ -292,7 +332,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
     expect(result.sessionId).toBe('recovered')
     expect(result.restoreMethod).toBe('new')
     expect(newCalls).toBe(2)
-    expect(seenNewParams[1]).toMatchObject({ mcpServers: [] })
+    expect(seenNewParams[1]).toMatchObject({ mcpServers: [{ name: 'inkdown' }] })
   })
 
   it('顶层 models 方言合成 model 选项（恢复建新路径）', async () => {

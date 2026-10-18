@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { AcpClient } from '../client/acp-client'
 import { getActiveAcpProcess } from '../process/process-manager'
 
-const PEER = join(import.meta.dir, 'fixtures/compat-agent.mjs')
+const PEER = join(import.meta.dirname, 'fixtures/compat-agent.mjs')
 const HOST_RULES = '# host rules\nHOST_RULES_MARKER: reply orders.\n'
 
 const dirs: string[] = []
@@ -276,9 +276,8 @@ describe('MCP rejection report', () => {
     const c = mockClient(resourceDir(), 'mcp-reject-probe', {MOCK_REJECT_MCP:'1'});
     expect((await c.connect()).ok).toBe(true);
     const opened = await c.createSession();
-    expect(opened.ok).toBe(true);
-    if (!opened.ok) return;
-    expect(opened.value.resourceReport?.skillsExposed).toBe('none');
+    expect(opened.ok).toBe(false);
+    if (opened.ok) throw new Error('MCP rejection must not silently create a tool-less session');
   });
 });
 

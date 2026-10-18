@@ -1,4 +1,4 @@
-import {test,expect} from 'bun:test'
+import {test,expect} from 'vitest'
 import {closeAcpSessions} from './sdk-client'
 test('closes each owned session once and waits for acknowledgements',async()=>{
  const closed:string[]=[]

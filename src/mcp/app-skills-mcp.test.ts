@@ -52,7 +52,7 @@ interface RpcClient {
 
 function startRunner(dir: string): RpcClient {
   const runner = resolveAppSkillsRunnerPath()
-  const child = spawn(process.execPath, [runner, dir], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+  const child = spawn(runner.endsWith('.ts') ? 'bun' : process.execPath, [runner, dir], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   children.push(child)
   let seq = 0
   const pending = new Map<number, (msg: { result?: unknown; error?: unknown }) => void>()

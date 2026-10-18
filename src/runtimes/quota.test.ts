@@ -54,7 +54,7 @@ describe('runtimes quota probes', () => {
     expect(quota?.provider).toContain('Antigravity')
     expect(['ok', 'unauthorized']).toContain(quota?.status)
     if (quota?.status === 'ok') {
-      expect(quota.primaryWindow).defined
+      expect(quota.primaryWindow).toBeDefined()
       expect(quota.credits?.unlimited).toBe(true)
     }
   }, 15000)

@@ -32,7 +32,7 @@
   "homepage": "https://github.com/yitom486/acp-client#readme",
   "scripts": {
     "build": "node scripts/sync-version.mjs && bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && bun build ./src/mcp/app-skills-mcp-serve.ts --outfile ./dist/app-skills-mcp-serve.cjs --format cjs --target node && bun build ./src/sidecar/main.ts --outfile ./dist/sidecar.cjs --format cjs --target node && tsc -p tsconfig.json",
-    "test": "bun test",
+    "test": "vitest run",
     "prepublishOnly": "bun run build",
     "version": "node scripts/sync-version.mjs && git add src/version.ts"
   },
@@ -41,7 +41,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   },
   "bin": {
     "acp-engine": "./dist/sidecar.cjs"

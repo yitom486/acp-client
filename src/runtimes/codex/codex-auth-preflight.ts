@@ -19,8 +19,8 @@ export function isCodexPreflightRuntime(runtimeId?: string): boolean {
   return !runtimeId || runtimeId === 'codex-acp'
 }
 
-export function resolveCodexHome(): string {
-  const fromEnv = process.env.CODEX_HOME?.trim()
+export function resolveCodexHome(env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = env.CODEX_HOME?.trim()
   if (fromEnv) return fromEnv
   return join(homedir(), '.codex')
 }

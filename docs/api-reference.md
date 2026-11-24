@@ -60,6 +60,12 @@ ACP 没有“工具呈现方式”的标准字段。支持的 Agent 在 `initial
 - **能力优先**：`supportsCodeMode(agentCapabilities)` 只读声明；没有声明就没有 code mode，不按运行时 id 猜测。
 - **不支持就忽略**：未声明的运行时不会收到该 `_meta`，也不会看到“勾了却没生效”的开关；想新增支持，按 `docs/adding-an-agent.md` 的“声明 code mode”一节接入。
 
+#### `authenticate(methodId: string): Promise<Result<void, AppError>>`
+
+对当前连接调用 ACP `authenticate`，`methodId` 来自 `connect().value.init.authMethods`。由宿主呈现登录选项并在用户选择后调用。若 `createSession` 或 `promptSession` 返回 `UNAUTHORIZED`，完成认证后重试原请求。Sidecar 对应 `client/authenticate`，参数为 `{ methodId }`。
+
+Antigravity CLI 使用运行时 `antigravity-cli`。终端登录可执行 `agy acp --login`，随后重新连接以使用 CLI 保存的凭据。
+
 #### `disconnect(reason?: string): Promise<void>`
 断开当前连接，释放 Stdio 管道并安全杀死后台进程（清理进程树，避免孤儿进程）。
 
@@ -98,8 +104,9 @@ export interface AcpClientCallbacks {
     sessionId?: string
     toolCall?: { id?: string; title?: string; kind?: string }
     params: Record<string, unknown>
+    signal: AbortSignal
   }) => Promise<{ outcome: 'selected'; optionId: string } | { outcome: 'cancelled' }>
-  // 允许放行统一用 pickAllowOptionId(params) 挑 Agent 给定的允许项（协议层无 'approved'）
+  // 展示 params.options，返回用户选择的 optionId。signal 中止时关闭审批界面。
 
   /** 会话状态与内容流式更新 */
   onSessionUpdate?: (params: Record<string, unknown>) => void

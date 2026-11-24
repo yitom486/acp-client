@@ -540,10 +540,19 @@ export const BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[] = [
     requiredEnvKeys: ['DEEPSEEK_API_KEY'],
   },
   {
+    id: 'antigravity-cli',
+    name: 'Antigravity',
+    description: '启动 Google Antigravity CLI 自带的 agy acp 服务',
+    authHint: '复用 Antigravity CLI 登录。需要登录时选择 Agent 提供的方式，或在终端运行 agy acp --login',
+    command: isWindowsPlatform() ? 'agy.exe' : 'agy',
+    args: ['acp'],
+    requiredEnvKeys: [],
+  },
+  {
     id: 'agy',
-    name: 'agy',
+    name: 'Antigravity (legacy bridge)',
     description:
-      '经 bunx 直调官方桥 JS 入口（免安装，跨平台；版本跟随 bunx 解析）',
+      '通过 bunx 启动 @yitom/agy-acp-map，兼容旧会话 ID 和桥接扩展',
     authHint: '复用 Antigravity CLI 本地登录态；未登录先在本机终端完成 agy 登录后再连接',
     command: 'bunx',
     args: ['-y', `${AGY_ACP_NPM_PACKAGE}@latest`],

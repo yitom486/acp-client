@@ -37,7 +37,7 @@ import {
 } from '../process/process-manager'
 import { connectSdkClient, sdkRequest, type SdkStreamHandle } from './sdk-client'
 import { registerAcpClientHandlers, type AcpClientHandlerDeps } from './client-handlers'
-import { restoreOrCreateAcpSession, type RestoreOrCreateSessionResult } from './session-open'
+import { isAuthenticationRequired, restoreOrCreateAcpSession, type RestoreOrCreateSessionResult } from './session-open'
 import { AcpTerminalManager } from './acp-terminal'
 import { buildAcpProxySpawnEnv, readAcpProxySettings } from './acp-proxy-service'
 import { getDefaultAgentDataDir } from './acp-paths'
@@ -47,7 +47,6 @@ import { buildCompatGuideText, compatDeliveryKey } from '../session/compat-guide
 import { APP_SKILLS_MCP_SERVER_NAME, buildAppSkillsMcpServer } from '../mcp/app-skills-mcp'
 import { randomUUID } from 'node:crypto'
 import { isSupportedBridgeVersion } from '../resources/eligibility'
-import { runConnectAuthGate } from '../auth/connect-auth-gate'
 import {
   parseLoadSessionSupported,
   parsePromptCapabilities,
@@ -60,6 +59,7 @@ export interface AcpClientCallbacks {
     sessionId?: string
     toolCall?: { id?: string; title?: string; kind?: string }
     params: Record<string, unknown>
+    signal: AbortSignal
   }) => Promise<AcpPermissionOutcome>
   /** 会话内容流式/状态更新通知 */
   onSessionUpdate?: (params: Record<string, unknown>) => void
@@ -164,6 +164,8 @@ export class AcpClient {
   private readonly configurationScope: 'overlay' | 'session'
   private sessionConfig: SessionConfigHome | null = null
   private readonly resourcesDir: string | null
+  private authenticatingAgent?: ClientConnection['agent']
+  private readonly permissionRequests = new Map<AbortController, string | undefined>()
   private readonly processScopeKey = randomUUID()
   private readonly callbacks: AcpClientCallbacks
   private readonly terminals = new AcpTerminalManager()
@@ -264,6 +266,41 @@ export class AcpClient {
 
   get initializeResponse(): InitializeResponse | null {
     return this.initResponse
+  }
+
+  /** Authenticate explicitly using a method advertised by the connected agent. */
+  async authenticate(methodId: string): Promise<Result<void, AppError>> {
+    const agent = this.sdkConnection?.agent
+    if (!agent || !this.isConnected) {
+      return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })
+    }
+    const method = this.initResponse?.authMethods?.find((entry) => entry.id === methodId)
+    if (!method) {
+      return err({ code: 'INVALID_ARGUMENT', message: 'Agent 未声明此认证方式' })
+    }
+    if ('type' in method && method.type === 'terminal') {
+      return err({ code: 'INVALID_ARGUMENT', message: '此认证方式需要在交互式终端中运行' })
+    }
+    if (this.authenticatingAgent === agent) {
+      return err({ code: 'INVALID_STATE', message: 'Agent 正在认证' })
+    }
+
+    this.authenticatingAgent = agent
+    try {
+      await sdkRequest(agent, methods.agent.authenticate, { methodId })
+      if (this.sdkConnection?.agent !== agent) {
+        return err({ code: 'CANCELLED', message: '认证期间 Agent 连接已关闭' })
+      }
+      return ok(undefined)
+    } catch (error) {
+      if (this.sdkConnection?.agent !== agent) {
+        return err({ code: 'CANCELLED', message: '认证期间 Agent 连接已关闭' })
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      return err({ code: isAuthenticationRequired(message) ? 'UNAUTHORIZED' : 'ACP_PROTOCOL_ERROR', message })
+    } finally {
+      if (this.authenticatingAgent === agent) this.authenticatingAgent = undefined
+    }
   }
 
   /**
@@ -432,15 +469,29 @@ export class AcpClient {
           return this.callbacks.readSnapshot(resource)
         },
         onPermission: async (payload) => {
-          if (this.callbacks.onPermissionRequest) {
-            return this.callbacks.onPermissionRequest({
+          const callback = this.callbacks.onPermissionRequest
+          const cancelled = { outcome: 'cancelled' } as const
+          if (!callback || payload.signal.aborted) return cancelled
+
+          const controller = new AbortController()
+          const signal = AbortSignal.any([payload.signal, controller.signal])
+          this.permissionRequests.set(controller, payload.sessionId)
+          let resolveCancellation!: (outcome: AcpPermissionOutcome) => void
+          const cancellation = new Promise<AcpPermissionOutcome>((resolve) => { resolveCancellation = resolve })
+          const onAbort = () => resolveCancellation(cancelled)
+          signal.addEventListener('abort', onAbort, { once: true })
+          try {
+            const outcome = await Promise.race([cancellation, callback({
               sessionId: payload.sessionId,
               toolCall: (payload.params as any)?.toolCall,
               params: payload.params,
-            })
+              signal,
+            })])
+            return signal.aborted ? cancelled : outcome
+          } finally {
+            signal.removeEventListener('abort', onAbort)
+            this.permissionRequests.delete(controller)
           }
-          // 默认保守：未提供审批回调时不静默同意，安全返回取消
-          return { outcome: 'cancelled' }
         },
         onSessionUpdate: (params) => {
           // Cache before forwarding so the list is readable even if the host
@@ -651,7 +702,7 @@ export class AcpClient {
       return ok(handle)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      return err({ code: 'ACP_PROTOCOL_ERROR', message })
+      return err({ code: isAuthenticationRequired(message) ? 'UNAUTHORIZED' : 'ACP_PROTOCOL_ERROR', message })
     }
   }
 
@@ -694,7 +745,8 @@ export class AcpClient {
       return ok(response)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      return err({ code: e instanceof AcpMcpRecoveryCancelledError ? 'CANCELLED' : 'ACP_PROTOCOL_ERROR', message })
+      if (e instanceof AcpMcpRecoveryCancelledError) return err({ code: 'CANCELLED', message })
+      return err({ code: isAuthenticationRequired(message) ? 'UNAUTHORIZED' : 'ACP_PROTOCOL_ERROR', message })
     } finally {
       if (generation === this.connectionGen) this.inflightPrompts.delete(sessionId)
     }
@@ -744,7 +796,9 @@ export class AcpClient {
     this.mcpRecovery.cancel(sessionId)
     if (!this.sdkConnection?.agent) return err({ code: 'ACP_NOT_CONNECTED', message: 'Agent is not connected' })
     try {
-      await this.sdkConnection.agent.notify(methods.agent.session.cancel, { sessionId })
+      const notifying = this.sdkConnection.agent.notify(methods.agent.session.cancel, { sessionId })
+      this.cancelPermissionRequests('session_cancelled', sessionId)
+      await notifying
       return ok(undefined)
     } catch (error) {
       return err({ code: 'ACP_PROTOCOL_ERROR', message: error instanceof Error ? error.message : String(error) })
@@ -779,6 +833,7 @@ export class AcpClient {
     ++this.connectionGen
     this.mcpRecovery.reset()
     this.inflightPrompts.clear()
+    this.cancelPermissionRequests('connection_closed')
     this.setStatus('disconnected', reason)
     this.resourcePrep = null
     const capabilities = this.initResponse?.agentCapabilities?.sessionCapabilities as Record<string, unknown> | undefined
@@ -815,6 +870,12 @@ export class AcpClient {
     if(config) {
       try {await config.dispose()}
       catch {this.callbacks.onLog?.('warn','Session configuration cleanup failed; directory retained',{directory:config.directory})}
+    }
+  }
+
+  private cancelPermissionRequests(reason: 'session_cancelled' | 'connection_closed', sessionId?: string) {
+    for (const [controller, pendingSessionId] of this.permissionRequests) {
+      if (sessionId === undefined || pendingSessionId === sessionId) controller.abort(reason)
     }
   }
 

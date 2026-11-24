@@ -144,6 +144,7 @@ export async function restoreOrCreateAcpSession(
         return result
       } catch (error) {
         lastError = errorMessage(error)
+        if (isAuthenticationRequired(lastError)) throw error
         log('warn', 'session restore failed', {
           method: rpcMethod,
           sessionId: resumeId,
@@ -179,7 +180,7 @@ export async function restoreOrCreateAcpSession(
       return (await request('session/new', baseParams)) as Record<string, unknown>
     } catch (firstError) {
       // A transport failure may arrive after session creation; avoid creating a duplicate.
-      if (isTransientAcpTransportError(firstError)) throw firstError
+      if (isAuthenticationRequired(errorMessage(firstError)) || isTransientAcpTransportError(firstError)) throw firstError
       // 已是裸调则无重试意义，直接抛
       if ((input.mcpServers ?? []).length === 0) throw firstError
       const preserve = input.preserveMcpOnRetry !== false

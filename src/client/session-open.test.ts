@@ -43,6 +43,21 @@ it('does not duplicate session/new after an ambiguous transport failure with MCP
   expect(calls).toBe(1)
 })
 
+it('preserves the requested operation when authentication is required', async () => {
+  for (const resumeSessionId of [null, 'existing-session']) {
+    const calls: string[] = []
+    await expect(restoreOrCreateAcpSession({
+      request: async (method) => {
+        calls.push(method)
+        throw RequestError.authRequired()
+      },
+      cwd: '/workspace', resumeSessionId, resumeSupported: true, loadSupported: true,
+      mcpServers: [{ name: 'host' }], log: () => undefined,
+    })).rejects.toMatchObject({ code: -32000 })
+    expect(calls).toEqual([resumeSessionId ? 'session/resume' : 'session/new'])
+  }
+})
+
 it('bounds optional recovered tool outputs without accepting arbitrary fields', async () => {
   const result = await restoreOrCreateAcpSession({
     request: async () => ({ sessionId: 'old', _meta: { toolOutputRecovery: { outputs: [
@@ -324,7 +339,7 @@ describe('restoreOrCreateAcpSession（SDK 内存对接）', () => {
       resumeSessionId: 'old-1',
       resumeSupported: true,
       loadSupported: true,
-      mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x' }],
+      mcpServers: [{ type: 'http', name: 'inkdown', url: 'http://x', headers: [] }],
       retryDelayMs: 0,
       log: () => undefined,
     })

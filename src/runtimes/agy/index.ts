@@ -27,3 +27,9 @@ export const agyAdapter: GenericRuntimeAdapter = {
   canSkipInteractiveAuth: () => false,
   tryDirectSessionFirst: true,
 }
+
+export const antigravityCliAdapter: GenericRuntimeAdapter = {
+  id: 'antigravity-cli',
+  probeAuth: probeAgyAuth,
+  tryDirectSessionFirst: true,
+}

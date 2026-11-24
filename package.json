@@ -1,6 +1,6 @@
 {
   "name": "@yitom/acp-client",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Headless ACP (Agent Client Protocol) SDK for connecting to Codex, Claude, Cursor, DeepSeek and more",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -38,10 +38,10 @@
     "test:mcp": "vitest run src/client/mcp-session-recovery.test.ts src/client/acp-client-mcp.test.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.0.0"
+    "@agentclientprotocol/sdk": "^2.9.1"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   },

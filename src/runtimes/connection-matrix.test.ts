@@ -47,4 +47,12 @@ describe('runtimes/connection-matrix', () => {
     const codex = BUILTIN_ACP_RUNTIMES.find((r) => r.id === 'codex-acp')
     expect(codex!.requiredEnvKeys.length).toBeGreaterThan(0)
   });
+
+  it('uses native agy ACP for new Antigravity connections and keeps the bridge ID', () => {
+    const native = BUILTIN_ACP_RUNTIMES.find((runtime) => runtime.id === 'antigravity-cli')
+    const bridge = BUILTIN_ACP_RUNTIMES.find((runtime) => runtime.id === 'agy')
+    expect(native).toMatchObject({ command: process.platform === 'win32' ? 'agy.exe' : 'agy', args: ['acp'] })
+    expect(bridge).toMatchObject({ command: 'bunx', args: ['-y', '@yitom/agy-acp-map@latest'] })
+    expect(getAcpRuntimeAdapter('antigravity-cli').appResourceSessionMeta).toBeUndefined()
+  });
 });

@@ -10,7 +10,7 @@ import { opencodeAdapter } from './opencode'
 import { opencodeV2Adapter } from './opencode-v2'
 import { cursorAdapter } from './cursor'
 import { deepseekAdapter } from './deepseek'
-import { agyAdapter } from './agy'
+import { agyAdapter, antigravityCliAdapter } from './agy'
 
 export * from './codex'
 export * from './claude'
@@ -105,6 +105,8 @@ export function getAcpRuntimeAdapter(runtimeId: string): AcpRuntimeAdapter {
       return deepseekAdapter
     case agyAdapter.id:
       return agyAdapter
+    case antigravityCliAdapter.id:
+      return antigravityCliAdapter
     default:
       return {
         id: runtimeId,

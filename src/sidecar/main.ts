@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import * as readline from 'node:readline'
+import { randomUUID } from 'node:crypto'
 import { ACP_CLIENT_VERSION } from '../version'
 import {
   AcpClient,
   AcpSessionHandle,
   BUILTIN_ACP_RUNTIMES,
   getAcpRuntimeAdapter,
+  isAcpPermissionOutcome,
   parseAcpConfigOptions,
   type AcpConnectionStatus,
   type AcpPermissionOutcome,
@@ -29,9 +31,28 @@ function sendError(id: string | number | null, code: number, message: string, da
 }
 
 let client: AcpClient | null = null
+let connectionGeneration = 0
 const activeSessions = new Map<string, AcpSessionHandle>()
-const pendingPermissions = new Map<string, (outcome: AcpPermissionOutcome) => void>()
+type PermissionCancellation = 'agent_cancelled' | 'session_cancelled' | 'connection_closed' | 'timeout'
+const pendingPermissions = new Map<string, {
+  params: Record<string, unknown>
+  finish: (outcome: AcpPermissionOutcome, reason?: PermissionCancellation) => void
+}>()
 let suppressUpdates = false
+
+function cancelPermissionsOnDisconnect() {
+  for (const pending of pendingPermissions.values()) {
+    pending.finish({ outcome: 'cancelled' }, 'connection_closed')
+  }
+}
+
+function detachClient() {
+  const previous = client
+  client = null
+  activeSessions.clear()
+  cancelPermissionsOnDisconnect()
+  return previous
+}
 
 function extractModelOptions(rawConfigOptions: unknown) {
   const parsed = parseAcpConfigOptions(rawConfigOptions)
@@ -148,19 +169,20 @@ async function handleRpcRequest(id: string | number, method: string, params: any
     }
 
     case 'client/connect': {
+      const generation = ++connectionGeneration
       try {
-        if (client) {
-          try {
-            await client.disconnect()
-          } catch {
-            // Ignore previous disconnect failure
-          }
-          client = null
-          activeSessions.clear()
+        try {
+          await detachClient()?.disconnect()
+        } catch {
+          // A connection can still be replaced when cleanup reports an error.
+        }
+        if (generation !== connectionGeneration) {
+          sendError(id, -32800, 'Connection request superseded')
+          return
         }
 
         const { runtime, workspaceRoot, clientInfo, dataDir, proxy, env, customCommand, customArgs } = params ?? {}
-        client = new AcpClient({
+        const next = new AcpClient({
           runtime: customCommand
             ? {
                 id: runtime ?? 'custom',
@@ -168,6 +190,7 @@ async function handleRpcRequest(id: string | number, method: string, params: any
                 description: 'Custom command launched via Dawnsight',
                 command: customCommand,
                 args: Array.isArray(customArgs) ? customArgs : [],
+                requiredEnvKeys: [],
               }
             : runtime ?? 'codex-acp',
           workspaceRoot: workspaceRoot ?? process.cwd(),
@@ -177,9 +200,12 @@ async function handleRpcRequest(id: string | number, method: string, params: any
           env,
           callbacks: {
             onStatusChange: (status: AcpConnectionStatus, detail?: string) => {
+              if (generation !== connectionGeneration) return
+              if (status === 'disconnected') cancelPermissionsOnDisconnect()
               sendNotification('status/change', { status, detail })
             },
             onSessionUpdate: (update: Record<string, unknown>) => {
+              if (generation !== connectionGeneration) return
               if (suppressUpdates) {
                 sendNotification('session/update', { ...update, suppressed: true })
               } else {
@@ -187,26 +213,28 @@ async function handleRpcRequest(id: string | number, method: string, params: any
               }
             },
             onStderrLine: (line: string) => {
+              if (generation !== connectionGeneration) return
               sendNotification('stderr/line', { line })
             },
-            onPermissionRequest: async ({ sessionId, toolCall, params: permParams }) => {
-              const requestId = 'req_' + Math.random().toString(36).slice(2, 10)
-              sendNotification('permission/request', {
-                requestId,
-                sessionId,
-                toolCall,
-                params: permParams,
-              })
-
+            onPermissionRequest: async ({ sessionId, toolCall, params: permParams, signal }) => {
+              if (generation !== connectionGeneration || signal.aborted) return { outcome: 'cancelled' }
+              const requestId = `req_${randomUUID()}`
               return new Promise<AcpPermissionOutcome>((resolve) => {
-                const timer = setTimeout(() => {
-                  pendingPermissions.delete(requestId)
-                  resolve({ outcome: 'cancelled' })
-                }, 120_000)
-
-                pendingPermissions.set(requestId, (outcome) => {
+                const finish = (outcome: AcpPermissionOutcome, reason?: PermissionCancellation) => {
+                  if (!pendingPermissions.delete(requestId)) return
                   clearTimeout(timer)
+                  signal.removeEventListener('abort', onAbort)
+                  if (reason) sendNotification('permission/cancelled', { requestId, sessionId, reason })
                   resolve(outcome)
+                }
+                const onAbort = () => finish({ outcome: 'cancelled' },
+                  signal.reason === 'session_cancelled' || signal.reason === 'connection_closed' ? signal.reason : 'agent_cancelled')
+                const timer = setTimeout(() => finish({ outcome: 'cancelled' }, 'timeout'), 120_000)
+                timer.unref()
+                pendingPermissions.set(requestId, { params: permParams, finish })
+                signal.addEventListener('abort', onAbort, { once: true })
+                sendNotification('permission/request', {
+                  requestId, sessionId, toolCall, params: permParams, options: permParams.options,
                 })
               })
             },
@@ -215,8 +243,13 @@ async function handleRpcRequest(id: string | number, method: string, params: any
             },
           },
         })
+        client = next
 
-        const connectResult = await client.connect()
+        const connectResult = await next.connect()
+        if (generation !== connectionGeneration) {
+          sendError(id, -32800, 'Connection request superseded')
+          return
+        }
         if (!connectResult.ok) {
           sendError(id, -32001, connectResult.error.message, connectResult.error)
           return
@@ -224,8 +257,8 @@ async function handleRpcRequest(id: string | number, method: string, params: any
 
         sendResponse(id, {
           success: true,
-          status: client.currentStatus,
-          initResponse: client.initializeResponse,
+          status: next.currentStatus,
+          initResponse: connectResult.value.init,
         })
       } catch (err: any) {
         sendError(id, -32000, err?.message ?? String(err))
@@ -233,28 +266,51 @@ async function handleRpcRequest(id: string | number, method: string, params: any
       break
     }
 
+    case 'client/authenticate': {
+      if (!client) {
+        sendError(id, -32002, 'Client not connected')
+        return
+      }
+      const { methodId } = params ?? {}
+      if (typeof methodId !== 'string' || !methodId.trim()) {
+        sendError(id, -32602, 'client/authenticate needs a methodId')
+        return
+      }
+      const result = await client.authenticate(methodId)
+      if (!result.ok) {
+        sendError(id, result.error.code === 'INVALID_ARGUMENT' ? -32602 : -32000, result.error.message, result.error)
+        return
+      }
+      sendResponse(id, { success: true })
+      break
+    }
+
     case 'session/open': {
       try {
-        if (!client) {
+        const current = client
+        if (!current) {
           sendError(id, -32002, 'Client not connected')
           return
         }
 
         const { resumeSessionId, mcpServers } = params ?? {}
-        const sessionResult = await client.createSession({
+        const sessionResult = await current.createSession({
           resumeSessionId: resumeSessionId ?? null,
           mcpServers: mcpServers ?? [],
         })
 
         if (!sessionResult.ok) {
-          sendError(id, -32003, sessionResult.error.message, sessionResult.error)
+          sendError(id, sessionResult.error.code === 'UNAUTHORIZED' ? -32000 : -32003, sessionResult.error.message, sessionResult.error)
           return
         }
 
         const handle = sessionResult.value
+        const availableCommands = await current.waitForAvailableCommands(handle.sessionId, 150)
+        if (client !== current || !current.isConnected) {
+          sendError(id, -32800, 'Connection changed while opening session')
+          return
+        }
         activeSessions.set(handle.sessionId, handle)
-
-        const availableCommands = await client.waitForAvailableCommands(handle.sessionId, 150)
         sendResponse(id, {
           sessionId: handle.sessionId,
           restoreMethod: handle.restoreMethod,
@@ -279,7 +335,7 @@ async function handleRpcRequest(id: string | number, method: string, params: any
 
         const promptResult = await session.prompt(promptText, { timeoutMs, images })
         if (!promptResult.ok) {
-          sendError(id, -32005, promptResult.error.message, promptResult.error)
+          sendError(id, promptResult.error.code === 'UNAUTHORIZED' ? -32000 : -32005, promptResult.error.message, promptResult.error)
           return
         }
 
@@ -416,41 +472,46 @@ async function handleRpcRequest(id: string | number, method: string, params: any
     }
 
     case 'session/cancel': {
-      try {
-        const { sessionId } = params ?? {}
-        if (client && (client as any).sdkConnection?.agent) {
-          const agent = (client as any).sdkConnection.agent
-          await agent.request('session/cancel', { sessionId })
-          sendResponse(id, { success: true })
-        } else {
-          sendError(id, -32002, 'Client not connected')
-        }
-      } catch (err: any) {
-        sendError(id, -32000, err?.message ?? String(err))
+      const { sessionId } = params ?? {}
+      if (!client) {
+        sendError(id, -32002, 'Client not connected')
+        return
       }
+      if (typeof sessionId !== 'string' || !sessionId) {
+        sendError(id, -32602, 'session/cancel needs a sessionId')
+        return
+      }
+      const result = await client.cancelSession(sessionId)
+      if (!result.ok) {
+        sendError(id, -32000, result.error.message, result.error)
+        return
+      }
+      sendResponse(id, { success: true })
       break
     }
 
     case 'permission/respond': {
       const { requestId, outcome } = params ?? {}
-      const resolver = pendingPermissions.get(requestId)
-      if (resolver) {
-        pendingPermissions.delete(requestId)
-        resolver(outcome ?? { outcome: 'cancelled' })
-        sendResponse(id, { success: true })
-      } else {
+      const pending = pendingPermissions.get(requestId)
+      if (!pending) {
         sendError(id, -32007, `Permission request ${requestId} not found`)
+        return
       }
+      const selection = outcome ?? { outcome: 'cancelled' }
+      if (!isAcpPermissionOutcome(selection, pending.params)) {
+        sendError(id, -32602, 'Choose an option offered for this permission request or cancel it')
+        return
+      }
+      pending.finish(selection)
+      sendResponse(id, { success: true })
       break
     }
 
     case 'client/disconnect': {
+      const generation = ++connectionGeneration
       try {
-        if (client) {
-          await client.disconnect()
-          client = null
-          activeSessions.clear()
-        }
+        await detachClient()?.disconnect()
+        if (generation === connectionGeneration) sendNotification('status/change', { status: 'disconnected' })
         sendResponse(id, { success: true })
       } catch (err: any) {
         sendError(id, -32000, err?.message ?? String(err))
@@ -488,11 +549,8 @@ function startSidecar() {
 
   rl.on('close', async () => {
     console.error('[acp-engine] stdin closed, terminating sidecar...')
-    if (client) {
-      try {
-        await client.disconnect()
-      } catch {}
-    }
+    ++connectionGeneration
+    try { await detachClient()?.disconnect() } catch {}
     process.exit(0)
   })
 

@@ -70,11 +70,9 @@ const client = new AcpClient({
     },
     onPermissionRequest: async ({ toolCall, params }) => {
       console.log(`Agent 请求调用工具:`, toolCall)
-      // 交互式批准（y）或自动放行：协议层只有 selected/cancelled，
-      // 允许项用 pickAllowOptionId 从 Agent 给的 options 里挑（无 'approved'）。
-      return pickAllowOptionId(params)
-        ? { outcome: 'selected' as const, optionId: pickAllowOptionId(params)! }
-        : { outcome: 'cancelled' as const }
+      console.log('审批选项', params.options)
+      // 交互宿主展示选项，并返回用户选择的 optionId。
+      return { outcome: 'cancelled' as const }
     },
     onSessionUpdate: (event) => {
       console.log(`[Stream Event]:`, event)
@@ -122,7 +120,7 @@ Sidecar：`session/open` 结果带 `availableCommands`（若已收到），并�
 在本包根目录一键构建生成 `dist`（ESM / CJS / `.d.ts`）：
 
 ```bash
-bun run build:acp
+bun run build
 ```
 
 产物说明：
@@ -148,7 +146,25 @@ bun run packages/acp/examples/standalone-acp-demo.ts
 
 会话专属配置环境：`resources: { directory, configurationScope: 'session' }`。仅替换子进程原生配置根，生成规则/纯文档技能、断开清理；不复制用户认证。支持范围、Cursor 规则边界及 agy/DeepSeek 的明确拒绝见 `docs/api-reference.md`。实现与测试：`src/resources/session-config.ts` / `session-config.test.ts`。
 
-### Antigravity session resources
+### Agent 启动方式
+
+Codex、Claude 和 DeepSeek 的启动命令会解析各自发布包的 `latest`，OpenCode v2 由 npm 启动。Antigravity、Gemini、Copilot、Cursor 和 `opencode` 入口使用宿主安装的 CLI。握手使用 ACP v1。
+
+需要安装包时，在 GitHub Actions 手动运行 `CI & Publish`。测试通过后，Artifacts 中的 `acp-client-npm-package` 包含 npm `.tgz`。
+
+### Antigravity CLI
+
+Use `new AcpClient({ runtime: 'antigravity-cli', workspaceRoot })` to start Google's `agy acp` from `PATH`. If the host uses a different `PATH`, pass a runtime object with an absolute `command` and `args: ['acp']`. The sidecar accepts the same runtime ID in `client/connect`.
+
+For session-supplied HTTP MCP servers, include `--process-per-session` in the runtime arguments.
+
+Call `createSession()` after `connect()` to reuse the CLI's cached sign-in. When the server requires sign-in, the SDK returns `UNAUTHORIZED`. Let the user select an advertised browser method from `init.authMethods`, call `client.authenticate(methodId)` (sidecar `client/authenticate`), and retry. For terminal login, run `agy acp --login` interactively and reconnect. Google stores the credentials through its CLI. See the [official ACP setup](https://antigravity.google/docs/ide/extensions/acp/#authentication).
+
+The CLI sends ACP permission requests when its policy requires review. Display the agent's choices and return the exact option ID the user selected. The sidecar sends `permission/request` with `requestId`, `sessionId`, `toolCall` and `options`. Reply via `permission/respond` with `{ requestId, outcome: { outcome: 'selected', optionId } }`. Dismissing the prompt uses `{ outcome: 'cancelled' }` as its outcome. Cancellation, timeout and connection changes emit `permission/cancelled` so the host can dismiss stale prompts. SDK hosts receive an `AbortSignal` for the same purpose. See the [CLI permission settings](https://antigravity.google/docs/cli-permissions) to configure which operations require review.
+
+Keep the `agy` runtime ID for sessions created by `@yitom/agy-acp-map` and for its resource extension. Keep session IDs paired with their runtime when saving history.
+
+### Antigravity bridge session resources
 
 With `@yitom/agy-acp-map` 0.1.24 / 0.1.25 / 0.1.26, `resources.directory` is delivered through the bridge session extension `_meta.appResources.directory`. Rules, native Skills and session MCP live in a private temporary additional workspace; cwd, global configuration and authentication remain unchanged. Close/delete/orderly shutdown remove the temporary workspace. Unknown bridge versions keep compatibility guidance and the app-skills MCP fallback. This extension is bridge-specific, not a standard ACP configuration-home API. `configurationScope: "session"` also supports agy; its configuration report remains conservative until the bridge accepts the session extension.
 

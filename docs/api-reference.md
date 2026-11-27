@@ -20,10 +20,16 @@ const client = new AcpClient(options: AcpClientOptions)
 | :--- | :--- | :---: | :--- |
 | `workspaceRoot` | `string` | **是** | Agent 工作区根目录（绝对路径） |
 | `runtime` | `string \| AcpRuntimeInfo` | 否 | 运行时标识（如 `'codex-acp'`、`'cursor-cli'`、`'claude'`、`'deepseek'` 等），默认 `'codex-acp'` |
-| `clientInfo` | `{ name: string; version?: string }` | 否 | 客户端身份声明，默认 `{ name: 'inkdown', version: '0.1.0' }` |
+| `clientInfo` | `{ name: string; version?: string }` | 否 | 客户端身份声明，默认 `{ name: 'acp-client', version: ACP_CLIENT_VERSION }` |
 | `dataDir` | `string` | 否 | 本地凭据与配置持久化目录，缺省自动使用操作系统标准应用数据目录 |
-| `proxy` | `Partial<AcpProxySettings>` | 否 | 代理配置 `{ enabled?: boolean; host?: string; port?: number }` |
+| `proxy` | `Partial<AcpProxySettings>` | 否 | 代理配置 `{ enabled?: boolean; host?: string; port?: number }`（与持久化配置合并并作用于子进程环境） |
 | `env` | `NodeJS.ProcessEnv` | 否 | 注入给子进程的额外环境变量 |
+| `requestTimeoutMs` | `number` | 否 | 控制面 RPC（`initialize` / `session/new` / `setConfigOption` 等）超时（毫秒，默认 `120_000`） |
+| `promptIdleTimeoutMs` | `number` | 否 | `session/prompt` 原生静默超时（毫秒，收到事件/FS/终端活动自动重置，等待人工审批期间暂停；默认 `300_000`，`0` 禁用） |
+| `promptMaxDurationMs` | `number` | 否 | `session/prompt` 硬性最大总时长上限（毫秒，默认 `0` 表示不限制总时长） |
+| `quotaCacheTtlMs` | `number` | 否 | 配额缓存有效期（毫秒，默认 `30_000`） |
+| `maxReadBytes` | `number` | 否 | `fs/read_text_file` 单次最大读取字节上限（默认 `2MB`） |
+| `terminalOutputByteLimit` | `number` | 否 | 内置终端输出缓冲区上限（字节，默认 `1MB`） |
 | `resources` | `{ directory: string }` | 否 | 应用资源目录（单目录接口）：含 `AGENTS.md` 与 `skills/<name>/SKILL.md`。提供即走原生资源准备（读取/合并/注入/报告），缺席保持旧行为 |
 | `callbacks` | `AcpClientCallbacks` | 否 | 事件与审批回调钩子（详见下文） |
 
@@ -85,8 +91,8 @@ Antigravity CLI 使用运行时 `antigravity-cli`。终端登录可执行 `agy a
 
 ### 方法
 
-#### `prompt(text: string, options?: { timeoutMs?: number }): Promise<Result<unknown, AppError>>`
-向当前会话发送提示词或用户输入。
+#### `prompt(text: string, options?: AcpPromptOptions): Promise<Result<unknown, AppError>>`
+向当前会话发送提示词或用户输入。默认启用基于活动的静默超时（`idleTimeoutMs` 默认 `300_000`，持续收到 `session/update`、FS 读写、终端输出会自动重置，等待用户审批期间暂停；仅超静默上限返回 `ACP_TIMEOUT`）。若显式传入旧参数 `timeoutMs`（且未传 `idleTimeoutMs`），仍按硬性总时长上限兼容执行。
 
 #### `setConfigOption(configId: string, value: string | boolean): Promise<Result<unknown, AppError>>`
 动态修改会话配置项（如切换底层模型 `model`、模式 `mode` 等）。

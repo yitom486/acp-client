@@ -35,12 +35,14 @@ import {
   tryReuseLiveAcpProcess,
   type SpawnedAcpProcess,
 } from '../process/process-manager'
-import { connectSdkClient, sdkRequest, type SdkStreamHandle } from './sdk-client'
+import { connectSdkClient, createSdkRequestActivityController, sdkRequest, sdkRequestWithActivity, SdkRequestTimeoutError, ACP_PROMPT_IDLE_TIMEOUT_MS, ACP_PROMPT_MAX_DURATION_MS, ACP_SDK_REQUEST_TIMEOUT_MS, type SdkRequestActivityController, type SdkStreamHandle } from './sdk-client'
 import { registerAcpClientHandlers, type AcpClientHandlerDeps } from './client-handlers'
 import { isAuthenticationRequired, restoreOrCreateAcpSession, type RestoreOrCreateSessionResult } from './session-open'
-import { AcpTerminalManager } from './acp-terminal'
+import { AcpTerminalManager, ACP_TERMINAL_DEFAULT_OUTPUT_BYTE_LIMIT } from './acp-terminal'
 import { buildAcpProxySpawnEnv, readAcpProxySettings } from './acp-proxy-service'
 import { getDefaultAgentDataDir } from './acp-paths'
+import { ACP_CLIENT_VERSION } from '../version'
+import { ACP_FS_MAX_READ_BYTES } from './acp-fs'
 import type { AppResourceReport } from '../resources/app-resources'
 import { readAppResourcesDir, isAbsolutePathLike, readAppRulesText, digestAppResources } from '../resources/app-resources'
 import { buildCompatGuideText, compatDeliveryKey } from '../session/compat-guide'
@@ -73,6 +75,17 @@ export interface AcpClientCallbacks {
   onLog?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
 }
 
+export interface AcpPromptOptions {
+  /** 显式硬性总时长上限（毫秒；向后兼容旧参数，若未同时传 idleTimeoutMs 则禁用静默重置） */
+  timeoutMs?: number
+  /** 活动重置的静默超时（毫秒；默认取 client promptIdleTimeoutMs 即 300_000；0 表示不限制） */
+  idleTimeoutMs?: number
+  /** 可选硬性最大总时长上限（毫秒；默认取 client promptMaxDurationMs 即 0 不限制） */
+  maxDurationMs?: number
+  /** 随 Prompt 一并发送的图片列表 */
+  images?: Array<{ mimeType: string; data: string }>
+}
+
 export interface AcpClientOptions {
   /** 运行时标识，如 'codex-acp', 'claude', 'cursor-cli', 'deepseek', 'gemini' 等 */
   runtime?: string | AcpRuntimeInfo
@@ -89,6 +102,18 @@ export interface AcpClientOptions {
   proxy?: Partial<AcpProxySettings>
   /** 附加环境变量 */
   env?: NodeJS.ProcessEnv
+  /** 控制面 RPC 默认超时（毫秒，默认 120_000） */
+  requestTimeoutMs?: number
+  /** Prompt 流式静默超时（毫秒，收到事件/FS/终端/审批活动自动重置，默认 300_000；0 表示关闭） */
+  promptIdleTimeoutMs?: number
+  /** Prompt 最大总时长上限（毫秒，默认 0 表示不限） */
+  promptMaxDurationMs?: number
+  /** 配额缓存有效期（毫秒，默认 30_000） */
+  quotaCacheTtlMs?: number
+  /** fs/read_text_file 单次最大读取字节上限（默认 2MB） */
+  maxReadBytes?: number
+  /** 终端输出缓冲区上限（字节，默认 1MB） */
+  terminalOutputByteLimit?: number
   /**
    * 应用资源目录（单目录接口）：`{ directory: 绝对路径 }`，
    * 含 AGENTS.md 与 skills/ 下 SKILL.md。提供即走原生资源准备
@@ -114,7 +139,7 @@ export class AcpSessionHandle {
   ) {}
 
   /** 向当前会话发送 Prompt / 消息交互 */
-  async prompt(promptText: string, options?: { timeoutMs?: number; images?: Array<{ mimeType: string; data: string }> }): Promise<Result<unknown, AppError>> {
+  async prompt(promptText: string, options?: AcpPromptOptions): Promise<Result<unknown, AppError>> {
     return this.client.promptSession(this.sessionId, promptText, options)
   }
 
@@ -161,7 +186,13 @@ export class AcpClient {
   private readonly workspaceRoot: string
   private readonly clientInfo: { name: string; version: string }
   private readonly dataDir: string
+  private readonly proxyOverride?: Partial<AcpProxySettings>
   private readonly extraEnv: NodeJS.ProcessEnv
+  private readonly requestTimeoutMs: number
+  private readonly promptIdleTimeoutMs: number
+  private readonly promptMaxDurationMs: number
+  private readonly quotaCacheTtlMs: number
+  private readonly maxReadBytes: number
   private readonly configurationScope: 'overlay' | 'session'
   private sessionConfig: SessionConfigHome | null = null
   private readonly resourcesDir: string | null
@@ -169,15 +200,15 @@ export class AcpClient {
   private readonly permissionRequests = new Map<AbortController, string | undefined>()
   private readonly processScopeKey = randomUUID()
   private readonly callbacks: AcpClientCallbacks
-  private readonly terminals = new AcpTerminalManager()
+  private readonly terminals: AcpTerminalManager
 
   private processHandle: SpawnedAcpProcess | null = null
   private sdkApp: ClientApp | null = null
   private sdkConnection: ClientConnection | null = null
   private streamHandle: SdkStreamHandle | null = null
   private initResponse: InitializeResponse | null = null
-  /** 在途 prompt 会话集合（忙时不打断温进程的判定依据） */
-  private readonly inflightPrompts = new Set<string>()
+  /** 在途 prompt 会话活动追踪器（忙时不打断温进程 + 支持事件重置静默超时） */
+  private readonly inflightTrackers = new Map<string, SdkRequestActivityController>()
   /** 本次连接周期的应用资源准备结果（无 resources 入口时为 null） */
   private resourcePrep: { profileTag: string | null; report: AppResourceReport } | null = null
   /** 连接代次（connect 推进；兼容记账与重连后重附带的诊断依据） */
@@ -206,11 +237,36 @@ export class AcpClient {
   constructor(options: AcpClientOptions) {
     this.workspaceRoot = options.workspaceRoot
     this.clientInfo = {
-      name: options.clientInfo?.name ?? 'inkdown',
-      version: options.clientInfo?.version ?? '0.1.1',
+      name: options.clientInfo?.name ?? 'acp-client',
+      version: options.clientInfo?.version ?? ACP_CLIENT_VERSION,
     }
     this.dataDir = options.dataDir ?? getDefaultAgentDataDir()
+    this.proxyOverride = options.proxy
     this.extraEnv = options.env ?? {}
+    this.requestTimeoutMs =
+      typeof options.requestTimeoutMs === 'number' && options.requestTimeoutMs > 0
+        ? options.requestTimeoutMs
+        : ACP_SDK_REQUEST_TIMEOUT_MS
+    this.promptIdleTimeoutMs =
+      typeof options.promptIdleTimeoutMs === 'number' && options.promptIdleTimeoutMs >= 0
+        ? options.promptIdleTimeoutMs
+        : ACP_PROMPT_IDLE_TIMEOUT_MS
+    this.promptMaxDurationMs =
+      typeof options.promptMaxDurationMs === 'number' && options.promptMaxDurationMs >= 0
+        ? options.promptMaxDurationMs
+        : ACP_PROMPT_MAX_DURATION_MS
+    this.quotaCacheTtlMs =
+      typeof options.quotaCacheTtlMs === 'number' && options.quotaCacheTtlMs >= 0
+        ? options.quotaCacheTtlMs
+        : 30_000
+    this.maxReadBytes =
+      typeof options.maxReadBytes === 'number' && options.maxReadBytes > 0
+        ? options.maxReadBytes
+        : ACP_FS_MAX_READ_BYTES
+    this.terminals = new AcpTerminalManager({
+      defaultOutputByteLimit: options.terminalOutputByteLimit ?? ACP_TERMINAL_DEFAULT_OUTPUT_BYTE_LIMIT,
+      onActivity: (sid) => this.touchSessionActivity(sid),
+    })
     if (options.resources && !isAbsolutePathLike(options.resources.directory)) {
       throw new Error('resources.directory 必须是本机绝对路径')
     }
@@ -224,12 +280,13 @@ export class AcpClient {
         if (!this.sdkConnection?.agent) throw new AcpMcpRecoveryCancelledError('ACP connection closed')
         return this.sdkConnection.agent.request(method, params, { cancellationSignal: signal })
       },
+      requestTimeoutMs: this.requestTimeoutMs,
       getCapabilities: () => ({
         resume: Boolean(this.initResponse && parseResumeSessionSupported(this.initResponse.agentCapabilities as any)),
         load: Boolean(this.initResponse && parseLoadSessionSupported(this.initResponse.agentCapabilities as any)),
       }),
       isConnected: () => this.isConnected,
-      isBusy: (sessionId) => [...this.inflightPrompts].some((id) => id !== sessionId),
+      isBusy: (sessionId) => [...this.inflightTrackers.keys()].some((id) => id !== sessionId),
       onSuppressUpdates: (suppress) => { this.suppressRecoveryUpdates = suppress },
       onEvent: (event) => this.callbacks.onLog?.('info', 'mcp.recovery.' + event.type, { sessionId: event.sessionId, method: event.method }),
     })
@@ -290,7 +347,7 @@ export class AcpClient {
 
     this.authenticatingAgent = agent
     try {
-      await sdkRequest(agent, methods.agent.authenticate, { methodId })
+      await sdkRequest(agent, methods.agent.authenticate, { methodId }, this.requestTimeoutMs)
       if (this.sdkConnection?.agent !== agent) {
         return err({ code: 'CANCELLED', message: '认证期间 Agent 连接已关闭' })
       }
@@ -300,7 +357,14 @@ export class AcpClient {
         return err({ code: 'CANCELLED', message: '认证期间 Agent 连接已关闭' })
       }
       const message = error instanceof Error ? error.message : String(error)
-      return err({ code: isAuthenticationRequired(message) ? 'UNAUTHORIZED' : 'ACP_PROTOCOL_ERROR', message })
+      return err({
+        code: error instanceof SdkRequestTimeoutError
+          ? 'ACP_TIMEOUT'
+          : isAuthenticationRequired(message)
+            ? 'UNAUTHORIZED'
+            : 'ACP_PROTOCOL_ERROR',
+        message,
+      })
     } finally {
       if (this.authenticatingAgent === agent) this.authenticatingAgent = undefined
     }
@@ -315,7 +379,7 @@ export class AcpClient {
    * 5. 执行 initialize 协议握手。
    */
   async connect(): Promise<Result<{ status: AcpConnectionStatus; init: InitializeResponse }, AppError>> {
-    if (this.inflightPrompts.size > 0) return err({ code: 'ACP_PROTOCOL_ERROR', message: 'Agent 正在回答，请结束后重新连接' })
+    if (this.inflightTrackers.size > 0) return err({ code: 'ACP_PROTOCOL_ERROR', message: 'Agent 正在回答，请结束后重新连接' })
     if (this.isConnected && this.initResponse) return ok({ status: this.status, init: this.initResponse })
     // 新连接周期开始：代次推进（兼容记账与重连后重附带的键）；旧会话记账保留
     // 至 disconnect（会话随进程消亡，重连后旧 id 按新代次重新评估）。
@@ -348,8 +412,11 @@ export class AcpClient {
 
       // 3. 代理与环境变量合成
       const storedProxy = await readAcpProxySettings(this.dataDir)
-      const proxyEnv = buildAcpProxySpawnEnv(storedProxy)
-      const baseEnv = this.adapter.getSpawnEnv?.(storedProxy) ?? proxyEnv
+      const effectiveProxy: AcpProxySettings = this.proxyOverride
+        ? { ...storedProxy, ...this.proxyOverride }
+        : storedProxy
+      const proxyEnv = buildAcpProxySpawnEnv(effectiveProxy)
+      const baseEnv = this.adapter.getSpawnEnv?.(effectiveProxy) ?? proxyEnv
       // 调用方附加环境（如自定义供应商 CODEX_HOME/KEY）显式优先于代理合成；
       // 无附加时行为与旧版完全一致。
       const spawnEnv = {
@@ -431,7 +498,7 @@ export class AcpClient {
         const reuse = tryReuseLiveAcpProcess(this.runtimeInfo.id, {
           expectedTag: profileTag,
           scopeKey: this.processScopeKey,
-          isBusy: (h) => this.inflightPrompts.size > 0 && this.processHandle === h,
+          isBusy: (h) => this.inflightTrackers.size > 0 && this.processHandle === h,
         })
         if (reuse.status === 'hit') {
           reusedHandle = reuse.handle
@@ -504,6 +571,9 @@ export class AcpClient {
           this.quotaCache.observe(params, this.runtimeInfo.id)
           if (!this.suppressRecoveryUpdates) this.callbacks.onSessionUpdate?.(params)
         },
+        onActivity: (sessionId) => this.touchSessionActivity(sessionId),
+        onPauseActivity: (sessionId) => this.pauseSessionActivity(sessionId),
+        maxReadBytes: this.maxReadBytes,
       }
 
       const { app, connection, streamHandle } = connectSdkClient(
@@ -512,6 +582,7 @@ export class AcpClient {
           registerAcpClientHandlers(clientApp, handlerDeps)
         },
         this.runtimeInfo.id,
+        this.clientInfo,
       )
 
       this.sdkApp = app
@@ -533,6 +604,7 @@ export class AcpClient {
             },
           },
         },
+        this.requestTimeoutMs,
       )
 
       this.initResponse = initResp
@@ -562,7 +634,7 @@ export class AcpClient {
       const message = e instanceof Error ? e.message : String(e)
       this.setStatus('error', message)
       await this.disconnect(message)
-      return err({ code: 'ACP_PROTOCOL_ERROR', message })
+      return err({ code: e instanceof SdkRequestTimeoutError ? 'ACP_TIMEOUT' : 'ACP_PROTOCOL_ERROR', message })
     }
   }
 
@@ -573,7 +645,7 @@ export class AcpClient {
 
   async getQuota(sessionId?: string): Promise<AcpAgentQuota | null> {
     const cached = this.getCachedQuota(sessionId)
-    if (cached && Date.now() - cached.updatedAt < 30_000) {
+    if (cached && this.quotaCacheTtlMs > 0 && Date.now() - cached.updatedAt < this.quotaCacheTtlMs) {
       return cached
     }
     if (this.adapter.probeQuota) {
@@ -657,7 +729,7 @@ export class AcpClient {
       )
       const openResult = await restoreOrCreateAcpSession({
         request: async (method, params) => {
-          return sdkRequest(agent, method, params)
+          return sdkRequest(agent, method, params, this.requestTimeoutMs)
         },
         cwd: this.workspaceRoot,
         resumeSessionId: options?.resumeSessionId ?? null,
@@ -705,7 +777,14 @@ export class AcpClient {
       return ok(handle)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      return err({ code: isAuthenticationRequired(message) ? 'UNAUTHORIZED' : 'ACP_PROTOCOL_ERROR', message })
+      return err({
+        code: e instanceof SdkRequestTimeoutError
+          ? 'ACP_TIMEOUT'
+          : isAuthenticationRequired(message)
+            ? 'UNAUTHORIZED'
+            : 'ACP_PROTOCOL_ERROR',
+        message,
+      })
     }
   }
 
@@ -713,17 +792,18 @@ export class AcpClient {
   async promptSession(
     sessionId: string,
     promptText: string,
-    options?: { timeoutMs?: number; images?: Array<{ mimeType: string; data: string }> },
+    options?: AcpPromptOptions,
   ): Promise<Result<unknown, AppError>> {
     if (!this.sdkConnection?.agent) {
       return err({ code: 'ACP_NOT_CONNECTED', message: '尚未连接到 Agent 服务端' })
     }
 
     if (!this.isConnected) return err({ code: 'ACP_NOT_CONNECTED', message: 'Agent is not connected' })
-    if (this.inflightPrompts.has(sessionId)) return err({ code: 'ACP_PROTOCOL_ERROR', message: 'Session already has an in-flight prompt' })
+    if (this.inflightTrackers.has(sessionId)) return err({ code: 'ACP_PROTOCOL_ERROR', message: 'Session already has an in-flight prompt' })
     const generation = this.connectionGen
     const agent = this.sdkConnection.agent
-    this.inflightPrompts.add(sessionId)
+    const tracker = createSdkRequestActivityController()
+    this.inflightTrackers.set(sessionId, tracker)
     try {
       await this.mcpRecovery.ensureReady(sessionId)
       if (generation !== this.connectionGen || !this.isConnected) throw new AcpMcpRecoveryCancelledError('ACP connection changed')
@@ -736,22 +816,44 @@ export class AcpClient {
       // 原生已交付、已发送过、未知会话一律不碰原文。
       const compat = this.buildCompatPrepend(sessionId)
       const blocks = compat ? [{ type: 'text', text: compat }, ...prompt] : prompt
-      const response = await sdkRequest(
+
+      const hasIdleOption = options?.idleTimeoutMs !== undefined
+      const hasTimeoutOption = options?.timeoutMs !== undefined
+      const idleTimeoutMs = hasIdleOption
+        ? options!.idleTimeoutMs!
+        : hasTimeoutOption
+          ? 0
+          : this.promptIdleTimeoutMs
+      const maxDurationMs =
+        options?.maxDurationMs ?? options?.timeoutMs ?? this.promptMaxDurationMs
+
+      const response = await sdkRequestWithActivity(
         agent,
         methods.agent.session.prompt,
         {
           sessionId,
           prompt: blocks,
         },
-        options?.timeoutMs,
+        {
+          idleTimeoutMs,
+          maxDurationMs,
+          activity: tracker,
+        },
       )
       return ok(response)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       if (e instanceof AcpMcpRecoveryCancelledError) return err({ code: 'CANCELLED', message })
+      if (e instanceof SdkRequestTimeoutError) {
+        this.cancelPermissionRequests('session_cancelled', sessionId)
+        void this.sdkConnection?.agent
+          ?.notify(methods.agent.session.cancel, { sessionId })
+          .catch(() => undefined)
+        return err({ code: 'ACP_TIMEOUT', message })
+      }
       return err({ code: isAuthenticationRequired(message) ? 'UNAUTHORIZED' : 'ACP_PROTOCOL_ERROR', message })
     } finally {
-      if (generation === this.connectionGen) this.inflightPrompts.delete(sessionId)
+      if (generation === this.connectionGen) this.inflightTrackers.delete(sessionId)
     }
   }
 
@@ -823,11 +925,11 @@ export class AcpClient {
         sessionId,
         configId,
         value,
-      })
+      }, this.requestTimeoutMs)
       return ok(response)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      return err({ code: 'ACP_PROTOCOL_ERROR', message })
+      return err({ code: e instanceof SdkRequestTimeoutError ? 'ACP_TIMEOUT' : 'ACP_PROTOCOL_ERROR', message })
     }
   }
 
@@ -835,7 +937,7 @@ export class AcpClient {
   async disconnect(reason?: string): Promise<void> {
     ++this.connectionGen
     this.mcpRecovery.reset()
-    this.inflightPrompts.clear()
+    this.inflightTrackers.clear()
     this.cancelPermissionRequests('connection_closed')
     this.setStatus('disconnected', reason)
     this.resourcePrep = null
@@ -873,6 +975,29 @@ export class AcpClient {
     if(config) {
       try {await config.dispose()}
       catch {this.callbacks.onLog?.('warn','Session configuration cleanup failed; directory retained',{directory:config.directory})}
+    }
+  }
+
+  private touchSessionActivity(sessionId?: string): void {
+    if (sessionId) {
+      this.inflightTrackers.get(sessionId)?.touch()
+      return
+    }
+    for (const tracker of this.inflightTrackers.values()) {
+      tracker.touch()
+    }
+  }
+
+  private pauseSessionActivity(sessionId?: string): () => void {
+    if (sessionId) {
+      return this.inflightTrackers.get(sessionId)?.pause() ?? (() => undefined)
+    }
+    const resumes = [...this.inflightTrackers.values()].map((tracker) => tracker.pause())
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      for (const resume of resumes) resume()
     }
   }
 

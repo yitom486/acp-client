@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto'
 import { assertPathInsideWorkspace } from './acp-fs'
 import { appendTerminalOutput } from '../transport/terminal-output-buffer'
 
-const DEFAULT_OUTPUT_BYTE_LIMIT = 1_048_576
+export const ACP_TERMINAL_DEFAULT_OUTPUT_BYTE_LIMIT = 1_048_576
+
+export interface AcpTerminalManagerOptions {
+  defaultOutputByteLimit?: number
+  onActivity?: (sessionId: string) => void
+}
 
 export interface AcpTerminalExitStatus {
   exitCode: number | null
@@ -59,6 +64,16 @@ function buildEnv(
 /** ACP Client 侧无头终端：spawn 命令，供 Agent 轮询 output / wait / kill / release */
 export class AcpTerminalManager {
   private terminals = new Map<string, TerminalRecord>()
+  private readonly defaultOutputByteLimit: number
+  private readonly onActivity?: (sessionId: string) => void
+
+  constructor(options?: AcpTerminalManagerOptions) {
+    this.defaultOutputByteLimit =
+      typeof options?.defaultOutputByteLimit === 'number' && options.defaultOutputByteLimit > 0
+        ? options.defaultOutputByteLimit
+        : ACP_TERMINAL_DEFAULT_OUTPUT_BYTE_LIMIT
+    this.onActivity = options?.onActivity
+  }
 
   create(params: CreateAcpTerminalParams): { terminalId: string } {
     const command = params.command?.trim()
@@ -68,7 +83,7 @@ export class AcpTerminalManager {
     const outputByteLimit =
       typeof params.outputByteLimit === 'number' && params.outputByteLimit > 0
         ? params.outputByteLimit
-        : DEFAULT_OUTPUT_BYTE_LIMIT
+        : this.defaultOutputByteLimit
 
     const child = spawn(command, params.args ?? [], {
       cwd,
@@ -97,6 +112,7 @@ export class AcpTerminalManager {
       const next = appendTerminalOutput(record.output, chunk, record.outputByteLimit)
       record.output = next.output
       if (next.truncated) record.truncated = true
+      this.onActivity?.(record.sessionId)
     }
 
     child.stdout?.on('data', onChunk)
@@ -115,11 +131,13 @@ export class AcpTerminalManager {
     })
 
     this.terminals.set(id, record)
+    this.onActivity?.(record.sessionId)
     return { terminalId: id }
   }
 
   getOutput(terminalId: string): AcpTerminalOutputSnapshot {
     const record = this.require(terminalId)
+    this.onActivity?.(record.sessionId)
     const snapshot: AcpTerminalOutputSnapshot = {
       output: record.output,
       truncated: record.truncated,
@@ -135,6 +153,7 @@ export class AcpTerminalManager {
 
   waitForExit(terminalId: string): Promise<AcpTerminalExitStatus> {
     const record = this.require(terminalId)
+    this.onActivity?.(record.sessionId)
     if (record.exited) {
       return Promise.resolve({ exitCode: record.exitCode, signal: record.signal })
     }
@@ -145,6 +164,7 @@ export class AcpTerminalManager {
 
   kill(terminalId: string): Record<string, never> {
     const record = this.require(terminalId)
+    this.onActivity?.(record.sessionId)
     if (!record.exited) {
       this.forceKill(record.child)
     }
@@ -154,6 +174,7 @@ export class AcpTerminalManager {
   release(terminalId: string): Record<string, never> {
     const record = this.terminals.get(terminalId)
     if (!record) return {}
+    this.onActivity?.(record.sessionId)
     if (!record.exited) {
       this.forceKill(record.child)
     }
@@ -207,6 +228,7 @@ export class AcpTerminalManager {
     record.exited = true
     record.exitCode = code
     record.signal = signal
+    this.onActivity?.(record.sessionId)
     const status = { exitCode: code, signal }
     for (const waiter of record.waiters) waiter(status)
     record.waiters = []

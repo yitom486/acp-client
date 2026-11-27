@@ -181,23 +181,49 @@ async function handleRpcRequest(id: string | number, method: string, params: any
           return
         }
 
-        const { runtime, workspaceRoot, clientInfo, dataDir, proxy, env, customCommand, customArgs } = params ?? {}
+        const {
+          runtime,
+          workspaceRoot,
+          clientInfo,
+          dataDir,
+          proxy,
+          env,
+          customCommand,
+          customArgs,
+          requestTimeoutMs,
+          promptIdleTimeoutMs,
+          promptMaxDurationMs,
+          permissionTimeoutMs,
+          quotaCacheTtlMs,
+          maxReadBytes,
+          terminalOutputByteLimit,
+        } = params ?? {}
+        const effectivePermissionTimeoutMs =
+          typeof permissionTimeoutMs === 'number' && Number.isFinite(permissionTimeoutMs) && permissionTimeoutMs >= 0
+            ? permissionTimeoutMs
+            : 300_000
         const next = new AcpClient({
           runtime: customCommand
             ? {
                 id: runtime ?? 'custom',
                 name: runtime ?? 'Custom Agent',
-                description: 'Custom command launched via Dawnsight',
+                description: 'Custom command launched via acp-engine',
                 command: customCommand,
                 args: Array.isArray(customArgs) ? customArgs : [],
                 requiredEnvKeys: [],
               }
             : runtime ?? 'codex-acp',
           workspaceRoot: workspaceRoot ?? process.cwd(),
-          clientInfo: clientInfo ?? { name: 'dawnsight-desktop', version: '0.4.0' },
+          clientInfo: clientInfo ?? { name: 'acp-engine', version: ACP_CLIENT_VERSION },
           dataDir,
           proxy,
           env,
+          requestTimeoutMs,
+          promptIdleTimeoutMs,
+          promptMaxDurationMs,
+          quotaCacheTtlMs,
+          maxReadBytes,
+          terminalOutputByteLimit,
           callbacks: {
             onStatusChange: (status: AcpConnectionStatus, detail?: string) => {
               if (generation !== connectionGeneration) return
@@ -220,17 +246,20 @@ async function handleRpcRequest(id: string | number, method: string, params: any
               if (generation !== connectionGeneration || signal.aborted) return { outcome: 'cancelled' }
               const requestId = `req_${randomUUID()}`
               return new Promise<AcpPermissionOutcome>((resolve) => {
+                let timer: ReturnType<typeof setTimeout> | undefined
                 const finish = (outcome: AcpPermissionOutcome, reason?: PermissionCancellation) => {
                   if (!pendingPermissions.delete(requestId)) return
-                  clearTimeout(timer)
+                  if (timer !== undefined) clearTimeout(timer)
                   signal.removeEventListener('abort', onAbort)
                   if (reason) sendNotification('permission/cancelled', { requestId, sessionId, reason })
                   resolve(outcome)
                 }
                 const onAbort = () => finish({ outcome: 'cancelled' },
                   signal.reason === 'session_cancelled' || signal.reason === 'connection_closed' ? signal.reason : 'agent_cancelled')
-                const timer = setTimeout(() => finish({ outcome: 'cancelled' }, 'timeout'), 120_000)
-                timer.unref()
+                if (effectivePermissionTimeoutMs > 0) {
+                  timer = setTimeout(() => finish({ outcome: 'cancelled' }, 'timeout'), effectivePermissionTimeoutMs)
+                  timer.unref()
+                }
                 pendingPermissions.set(requestId, { params: permParams, finish })
                 signal.addEventListener('abort', onAbort, { once: true })
                 sendNotification('permission/request', {
@@ -326,14 +355,14 @@ async function handleRpcRequest(id: string | number, method: string, params: any
 
     case 'session/prompt': {
       try {
-        const { sessionId, promptText, timeoutMs, images } = params ?? {}
+        const { sessionId, promptText, timeoutMs, idleTimeoutMs, maxDurationMs, images } = params ?? {}
         const session = activeSessions.get(sessionId)
         if (!session) {
           sendError(id, -32004, `Session ${sessionId} not found`)
           return
         }
 
-        const promptResult = await session.prompt(promptText, { timeoutMs, images })
+        const promptResult = await session.prompt(promptText, { timeoutMs, idleTimeoutMs, maxDurationMs, images })
         if (!promptResult.ok) {
           sendError(id, promptResult.error.code === 'UNAUTHORIZED' ? -32000 : -32005, promptResult.error.message, promptResult.error)
           return

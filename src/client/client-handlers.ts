@@ -25,6 +25,12 @@ export interface AcpClientHandlerDeps {
   }) => Promise<AcpPermissionOutcome>
   /** session/update 通知透传（回放压制由调用方做） */
   onSessionUpdate: (params: Record<string, unknown>) => void
+  /** 协议或工具活跃事件通知（用于重置 Prompt 静默超时） */
+  onActivity?: (sessionId?: string) => void
+  /** 进入阻塞等待（如人工审批）时暂停静默超时，返回恢复函数 */
+  onPauseActivity?: (sessionId?: string) => () => void
+  /** fs/read_text_file 单次最大读取字节上限 */
+  maxReadBytes?: number
 }
 
 function toInvalidParams(message: string): RequestError {
@@ -43,6 +49,8 @@ function toServerError(error: unknown, fallback: string): RequestError {
 export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandlerDeps): void {
   app.onRequest(methods.client.session.requestPermission, async (ctx) => {
     const params = ctx.params as unknown as Record<string, unknown>
+    const sessionId = typeof params.sessionId === 'string' ? params.sessionId : undefined
+    deps.onActivity?.(sessionId)
     const toolCall = params.toolCall
     const toolHint =
       toolCall && typeof toolCall === 'object'
@@ -67,9 +75,10 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
       toolCall: toolHint,
       optionCount: Array.isArray(params.options) ? params.options.length : undefined,
     })
+    const resumeActivity = deps.onPauseActivity?.(sessionId)
     try {
       const outcome = await deps.onPermission({
-        sessionId: typeof params.sessionId === 'string' ? params.sessionId : undefined,
+        sessionId,
         params,
         signal: ctx.signal,
       })
@@ -77,12 +86,19 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
     } catch (error) {
       console.error('[acp] request_permission 失败', error)
       return { outcome: { outcome: 'cancelled' } as AcpPermissionOutcome }
+    } finally {
+      resumeActivity?.()
+      deps.onActivity?.(sessionId)
     }
   })
 
   app.onRequest(methods.client.fs.readTextFile, async (ctx) => {
     const workspaceRoot = deps.getWorkspaceRoot()
     const filePath = ctx.params.path
+    const sessionId = typeof (ctx.params as { sessionId?: unknown })?.sessionId === 'string'
+      ? (ctx.params as { sessionId: string }).sessionId
+      : undefined
+    deps.onActivity?.(sessionId)
     if (!workspaceRoot || !filePath) {
       throw toInvalidParams('fs/read_text_file 需要 path 与已连接工作区')
     }
@@ -96,12 +112,12 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
         })
         return { content }
       } catch (error) {
-        throw toServerError(error, '读取 Inkdown 快照失败')
+        throw toServerError(error, '读取虚拟快照失败')
       }
     }
 
     if (isInkdownVirtualDirPath(filePath, workspaceRoot)) {
-      throw toInvalidParams(`Inkdown 虚拟目录下可读：${INKDOWN_VIRTUAL_RESOURCES.join('、')}`)
+      throw toInvalidParams(`虚拟目录下可读：${INKDOWN_VIRTUAL_RESOURCES.join('、')}`)
     }
 
     try {
@@ -110,6 +126,7 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
         workspaceRoot,
         line: ctx.params.line ?? undefined,
         limit: ctx.params.limit ?? undefined,
+        maxReadBytes: deps.maxReadBytes,
       })
       console.info('[acp] fs/read_text_file ok', { path: filePath })
       return result
@@ -122,6 +139,10 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
     const workspaceRoot = deps.getWorkspaceRoot()
     const filePath = ctx.params.path
     const content = ctx.params.content
+    const sessionId = typeof (ctx.params as { sessionId?: unknown })?.sessionId === 'string'
+      ? (ctx.params as { sessionId: string }).sessionId
+      : undefined
+    deps.onActivity?.(sessionId)
     if (!workspaceRoot || !filePath || typeof content !== 'string') {
       throw toInvalidParams('fs/write_text_file 需要 path、content 与已连接工作区')
     }
@@ -142,6 +163,7 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
     const workspaceRoot = deps.getWorkspaceRoot()
     const sessionId = ctx.params.sessionId
     const command = ctx.params.command
+    deps.onActivity?.(sessionId)
     if (!workspaceRoot || !sessionId || !command) {
       throw toInvalidParams('terminal/create 需要 sessionId、command 与已连接工作区')
     }
@@ -162,6 +184,10 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
 
   app.onRequest(methods.client.terminal.output, async (ctx) => {
     const terminalId = ctx.params.terminalId
+    const sessionId = typeof (ctx.params as { sessionId?: unknown })?.sessionId === 'string'
+      ? (ctx.params as { sessionId: string }).sessionId
+      : undefined
+    deps.onActivity?.(sessionId)
     if (!terminalId) {
       throw toInvalidParams('terminal/output 需要 terminalId')
     }
@@ -174,6 +200,10 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
 
   app.onRequest(methods.client.terminal.waitForExit, async (ctx) => {
     const terminalId = ctx.params.terminalId
+    const sessionId = typeof (ctx.params as { sessionId?: unknown })?.sessionId === 'string'
+      ? (ctx.params as { sessionId: string }).sessionId
+      : undefined
+    deps.onActivity?.(sessionId)
     if (!terminalId) {
       throw toInvalidParams('terminal/wait_for_exit 需要 terminalId')
     }
@@ -186,6 +216,10 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
 
   app.onRequest(methods.client.terminal.kill, async (ctx) => {
     const terminalId = ctx.params.terminalId
+    const sessionId = typeof (ctx.params as { sessionId?: unknown })?.sessionId === 'string'
+      ? (ctx.params as { sessionId: string }).sessionId
+      : undefined
+    deps.onActivity?.(sessionId)
     if (!terminalId) {
       throw toInvalidParams('terminal/kill 需要 terminalId')
     }
@@ -198,6 +232,10 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
 
   app.onRequest(methods.client.terminal.release, async (ctx) => {
     const terminalId = ctx.params.terminalId
+    const sessionId = typeof (ctx.params as { sessionId?: unknown })?.sessionId === 'string'
+      ? (ctx.params as { sessionId: string }).sessionId
+      : undefined
+    deps.onActivity?.(sessionId)
     if (!terminalId) {
       throw toInvalidParams('terminal/release 需要 terminalId')
     }
@@ -209,6 +247,7 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
   })
 
   app.onNotification(methods.client.session.update, async (ctx) => {
+    deps.onActivity?.(ctx.params.sessionId)
     deps.onSessionUpdate({
       sessionId: ctx.params.sessionId,
       update: ctx.params.update,

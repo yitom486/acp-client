@@ -1,6 +1,6 @@
 # 新增 Agent 运行时适配器指南 (Adding an Agent)
 
-`@inkdown/acp` 采用插件化适配器（Adapter Pattern）架构。如果你想接入一个新的 Agent 运行时，**只需要在一个地方新增适配器文件并注册**，所有调用该 SDK 的项目（CLI、Electron、Tauri、Web 等）即可全局自动支持该 Agent！
+`@yitom/acp-client` 采用插件化适配器（Adapter Pattern）架构。如果你想接入一个新的 Agent 运行时，**只需要在一个地方新增适配器文件并注册**，所有调用该 SDK 的项目（CLI、Electron、Tauri、Web 等）即可全局自动支持该 Agent！
 
 ---
 

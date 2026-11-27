@@ -19,8 +19,8 @@
 
 ## ⚡ 核心特性
 
-- **多 Agent 统一适配（8 大主流运行时）**：
-  开箱即用支持 `codex-acp` (ChatGPT)、`claude`、`cursor-cli`、`deepseek`、`gemini`、`copilot`、`opencode`、`agy`。新增 Agent 只需在该包实现一个适配器，全局所有项目自动生效。
+- **多 Agent 统一适配（10 大内置运行时）**：
+  开箱即用支持 `codex-acp` (ChatGPT)、`claude`、`cursor-cli`、`deepseek`、`gemini`、`copilot`、`opencode`、`opencode-v2`、`antigravity-cli`、`agy`。新增 Agent 只需在该包实现一个适配器，全局所有项目自动生效。
 - **纯 Node.js / Headless 架构**：
   不依赖任何 Electron API、React 或特定前端框架。配置目录跨平台自动检测回落（支持自定义 `dataDir`）。
 - **生命周期全托管**：
@@ -47,7 +47,9 @@
 | `gemini` | Gemini | `~/.gemini/oauth_creds.json` / `GEMINI_API_KEY` | 自动探测 OAuth 凭证与系统 Key |
 | `copilot` | Copilot | `~/.copilot/config.json` / `GH_TOKEN` | 自动提取 `loggedInUsers` 凭证列表 |
 | `opencode` | OpenCode | `$XDG_DATA_HOME/opencode/auth.json` | 遵循 XDG / `%LOCALAPPDATA%` 规范 |
-| `agy` | agy | 官方桥接器免密直连 | `tryDirectSessionFirst` 免鉴权直通 |
+| `opencode-v2` | OpenCode v2 | v2 SQLite 登录态 | 通过 `npx @opencode/cli acp` 启动 |
+| `antigravity-cli` | Antigravity | Antigravity CLI 登录态 (`agy acp`) | 自动探测 `PATH` 与 `~/.local/bin/agy`，支持配额探测与浏览器认证 |
+| `agy` | Antigravity (legacy bridge) | `@yitom/agy-acp-map` 桥接器 | `tryDirectSessionFirst` 免鉴权直通，保留旧会话 ID 与扩展 |
 
 ---
 
@@ -90,7 +92,7 @@ if (!connectResult.ok) {
 // 3. 创建/恢复会话
 const sessionResult = await client.createSession()
 if (sessionResult.ok) {
-  const session = sessionResult.data
+  const session = sessionResult.value
   // 4. 发送提示词 / 消息交互
   await session.prompt('请帮我分析当前项目目录结构')
 }
@@ -135,7 +137,7 @@ bun run build
 我们在 [`examples/standalone-acp-demo.ts`](./examples/standalone-acp-demo.ts) 提供了可在终端直接运行的验证脚本：
 
 ```bash
-bun run packages/acp/examples/standalone-acp-demo.ts
+bun run examples/standalone-acp-demo.ts
 ```
 
 资源接口当前为未发布试点：规则准备与会话应用分开记录；已有磁盘配置保守回退；skillsFound 仅 SDK 文件扫描，尚无原生技能挂载或通用兼容提示词注入。详见 docs/api-reference.md 第 5 节。
@@ -154,7 +156,7 @@ Codex、Claude 和 DeepSeek 的启动命令会解析各自发布包的 `latest`�
 
 ### Antigravity CLI
 
-Use `new AcpClient({ runtime: 'antigravity-cli', workspaceRoot })` to start Google's `agy acp` from `PATH`. If the host uses a different `PATH`, pass a runtime object with an absolute `command` and `args: ['acp']`. The sidecar accepts the same runtime ID in `client/connect`.
+Use `new AcpClient({ runtime: 'antigravity-cli', workspaceRoot })` to start Google's `agy acp` (auto-resolved from `PATH` or `~/.local/bin/agy`, and `%LOCALAPPDATA%\antigravity\agy.exe` / `%USERPROFILE%\.local\bin\agy.exe` on Windows). If the host needs extra flags or a custom path, pass a runtime object with an explicit `command` and `args` (explicit custom runtimes are never overwritten by `resolveSpawnCommand`). Also supports `session.getQuota()` / `probeAgyQuota({ runtimeId: 'antigravity-cli' })`. The sidecar accepts the same runtime ID in `client/connect`.
 
 For session-supplied HTTP MCP servers, include `--process-per-session` in the runtime arguments.
 

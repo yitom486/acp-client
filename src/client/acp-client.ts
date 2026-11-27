@@ -156,6 +156,7 @@ export class AcpClient {
   private readonly commandsCache = new AvailableCommandsCache()
   private readonly quotaCache = new QuotaCache()
   private runtimeInfo: AcpRuntimeInfo
+  private readonly hasCustomRuntime: boolean
   private adapter: AcpRuntimeAdapter
   private readonly workspaceRoot: string
   private readonly clientInfo: { name: string; version: string }
@@ -241,8 +242,10 @@ export class AcpClient {
     this.adapter = getAcpRuntimeAdapter(runtimeId)
 
     if (typeof options.runtime === 'object' && options.runtime !== null) {
+      this.hasCustomRuntime = true
       this.runtimeInfo = options.runtime
     } else {
+      this.hasCustomRuntime = false
       const found = findBuiltinAcpRuntime(runtimeId)
       if (!found) {
         throw new Error(`未知或未注册的 ACP 运行时模板: ${runtimeId}`)
@@ -330,9 +333,9 @@ export class AcpClient {
         return err({ code: 'ACP_SPAWN_ERROR', message: blocker })
       }
 
-      // 2. 命令行路径动态解析（如 Cursor 探测 agent.cmd / PATH）
+      // 2. 命令行路径动态解析（如 Cursor 探测 agent.cmd / PATH；显式传入自定义 AcpRuntimeInfo 时不覆盖）
       let effectiveRuntime = { ...this.runtimeInfo }
-      if (this.adapter.resolveSpawnCommand) {
+      if (!this.hasCustomRuntime && this.adapter.resolveSpawnCommand) {
         const resolved = this.adapter.resolveSpawnCommand()
         if (!resolved) {
           const message = `运行时 CLI 未安装: ${this.runtimeInfo.id}`

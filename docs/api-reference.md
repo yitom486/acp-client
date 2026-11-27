@@ -1,6 +1,6 @@
 # 完整 API 参考文档 (API Reference)
 
-本文档详细列出 `@inkdown/acp` 导出的所有核心类、方法与类型定义。
+本文档详细列出 `@yitom/acp-client` 导出的所有核心类、方法与类型定义。
 
 ---
 
@@ -132,7 +132,7 @@ export interface AcpClientCallbacks {
 - `getAcpRuntimeAdapter(runtimeId: string): AcpRuntimeAdapter`
   获取指定运行时的适配器对象。
 - `BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[]`
-  获取当前内置支持的所有 8 大 Agent 运行时配置元数据列表。
+  获取当前内置支持的所有 Agent 运行时配置元数据列表。
 
 ---
 

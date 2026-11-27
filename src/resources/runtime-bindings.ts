@@ -12,6 +12,7 @@ export const APP_RESOURCE_CAPABILITIES = {
   gemini: { entry: null, strategy: 'compatibility', configHome: 'GEMINI_CLI_HOME' },
   copilot: { entry: null, strategy: 'compatibility', configHome: 'COPILOT_HOME', candidateEntry: 'COPILOT_CUSTOM_INSTRUCTIONS_DIRS' },
   'cursor-cli': { entry: null, strategy: 'compatibility', configHome: 'CURSOR_CONFIG_DIR' },
+  'antigravity-cli': { entry: null, strategy: 'compatibility', configHome: null },
   agy: { entry: '_meta.appResources.directory', strategy: 'native-session', configHome: null },
   deepseek: { entry: null, strategy: 'compatibility', configHome: null },
 } as const

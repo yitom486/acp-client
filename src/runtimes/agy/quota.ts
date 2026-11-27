@@ -126,7 +126,8 @@ export function resolveAntigravityLanguageServer(): { port: number; csrfToken: s
   return null
 }
 
-export async function probeAgyQuota(options?: { sessionId?: string }): Promise<AcpAgentQuota | null> {
+export async function probeAgyQuota(options?: { sessionId?: string; runtimeId?: string }): Promise<AcpAgentQuota | null> {
+  const runtimeId = options?.runtimeId ?? 'agy'
   const acc = resolveAntigravityAccount()
   const lsInfo = resolveAntigravityLanguageServer()
 
@@ -261,7 +262,7 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
         ].filter(Boolean) as AcpQuotaLimitWindow[]
 
         return {
-          runtimeId: 'agy',
+          runtimeId,
           provider: 'Google Antigravity',
           account: {
             email: acc.email,
@@ -291,7 +292,7 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
 
   if (!isAvailable) {
     return {
-      runtimeId: 'agy',
+      runtimeId,
       provider: 'Google Antigravity',
       status: 'unauthorized',
       message: '未检测到 Antigravity 登录凭据',
@@ -300,7 +301,7 @@ export async function probeAgyQuota(options?: { sessionId?: string }): Promise<A
   }
 
   return {
-    runtimeId: 'agy',
+    runtimeId,
     provider: 'Google Antigravity',
     account: {
       email: acc.email,

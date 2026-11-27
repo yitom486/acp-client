@@ -1,6 +1,6 @@
 # 快速入门指南 (Getting Started)
 
-本指南介绍如何在不同的技术栈与应用宿主中快速集成 `@inkdown/acp`。
+本指南介绍如何在不同的技术栈与应用宿主中快速集成 `@yitom/acp-client`。
 
 ---
 
@@ -9,9 +9,9 @@
 在目标项目中安装本包：
 
 ```bash
-bun add @inkdown/acp
+bun add @yitom/acp-client
 # 或
-npm install @inkdown/acp
+npm install @yitom/acp-client
 ```
 
 > **环境要求**：Node.js 18+ 或 Bun 1.0+。
@@ -74,7 +74,7 @@ async function runCli() {
     rl.close()
     return
   }
-  const session = sessionRes.data
+  const session = sessionRes.value
 
   // 3. 循环问答
   while (true) {
@@ -99,7 +99,7 @@ runCli().catch(console.error)
 
 ```typescript
 import { WebSocketServer } from 'ws'
-import { AcpClient } from '@inkdown/acp'
+import { AcpClient } from '@yitom/acp-client'
 
 const wss = new WebSocketServer({ port: 8080 })
 
@@ -120,7 +120,7 @@ wss.on('connection', async (ws) => {
   })
 
   await client.connect()
-  const session = (await client.createSession()).data
+  const session = (await client.createSession()).value
 
   ws.on('message', async (message) => {
     const { prompt } = JSON.parse(message.toString())
@@ -141,7 +141,7 @@ wss.on('connection', async (ws) => {
 
 ```typescript
 import { BrowserWindow } from 'electron'
-import { AcpClient } from '@inkdown/acp'
+import { AcpClient } from '@yitom/acp-client'
 
 export function setupAcpClient(mainWindow: BrowserWindow, workspaceRoot: string) {
   const client = new AcpClient({

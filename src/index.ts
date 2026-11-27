@@ -1,8 +1,8 @@
 /**
- * @inkdown/acp — Headless Agent Client Protocol SDK
+ * @yitom/acp-client — Headless Agent Client Protocol SDK
  * 
  * 完整的 ACP 客户端协议栈，包含：
- * - runtimes: 8 大主流 Agent 运行时（Codex, Claude, Cursor, DeepSeek, Gemini, Copilot, OpenCode, Agy）
+ * - runtimes: 内置主流 Agent 运行时（Codex, Claude, Cursor, DeepSeek, Gemini, Copilot, OpenCode, Antigravity CLI, Agy）
  * - process: 跨平台子进程生命周期、级联 kill 与温进程池复用
  * - client: 独立的 AcpClient 客户端、会话状态机、stdio 桥接与通用回调
  * - auth: 统一认证守门员、密钥探测与 CODEX_HOME 隔离

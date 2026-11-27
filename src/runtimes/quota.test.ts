@@ -5,6 +5,7 @@ import {
   opencodeAdapter,
   cursorAdapter,
   agyAdapter,
+  antigravityCliAdapter,
 } from './index'
 import { AcpClient } from '../client/acp-client'
 
@@ -57,6 +58,14 @@ describe('runtimes quota probes', () => {
       expect(quota.primaryWindow).toBeDefined()
       expect(quota.credits?.unlimited).toBe(true)
     }
+  }, 15000)
+
+  it('antigravityCliAdapter provides probeQuota with runtimeId=antigravity-cli', async () => {
+    expect(typeof antigravityCliAdapter.probeQuota).toBe('function')
+    const quota = await antigravityCliAdapter.probeQuota!()
+    expect(quota).not.toBeNull()
+    expect(quota?.runtimeId).toBe('antigravity-cli')
+    expect(['ok', 'unauthorized']).toContain(quota?.status)
   }, 15000)
 
   it('AcpClient integrates quota methods', async () => {

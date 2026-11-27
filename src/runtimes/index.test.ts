@@ -32,6 +32,7 @@ describe('runtimes/index', () => {
       { id: 'opencode-v2', authMethodsPassthrough: true },
       { id: 'cursor-cli', authMethodsPassthrough: true },
       { id: 'deepseek', authMethodsPassthrough: true },
+      { id: 'antigravity-cli', authMethodsPassthrough: true },
       { id: 'agy', authMethodsPassthrough: true },
     ]
     for (const { id } of cases) {

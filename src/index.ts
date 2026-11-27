@@ -1,62 +1,57 @@
 /**
- * @yitom/acp-client — Headless Agent Client Protocol SDK
- * 
- * 完整的 ACP 客户端协议栈，包含：
- * - runtimes: 内置主流 Agent 运行时（Codex, Claude, Cursor, DeepSeek, Gemini, Copilot, OpenCode, Antigravity CLI, Agy）
- * - process: 跨平台子进程生命周期、级联 kill 与温进程池复用
- * - client: 独立的 AcpClient 客户端、会话状态机、stdio 桥接与通用回调
- * - auth: 统一认证守门员、密钥探测与 CODEX_HOME 隔离
- * - mcp: 通用只读技能 MCP 兜底服务与连接健康监测
- * - session: 运行时配置、能力协商与会话注册表
- * - transport: stdio 缓冲与终端输出处理
+ * @yitom/acp-client — Headless Agent Client Protocol SDK (Hexagonal Architecture)
+ *
+ * Layered exports:
+ * - domain: pure contracts, auth gates, session/capability parsers, quota cache, health monitor
+ * - ports: runtime plugin & registry ports, transport/process/host/resource port interfaces
+ * - application: pure AcpClientEngine, session open state machine, MCP recovery, permission coordinator
+ * - adapters/driving: AcpClient & AcpSessionHandle SDK facade (and acp-engine sidecar binary)
+ * - adapters/driven: Node process/FS/terminal/proxy, @agentclientprotocol/sdk transport, resources, 10 runtime plugins
+ * - bootstrap: default Node.js composition root
  */
 
-// ── 核心常量与共享契约重导出 ──
-export * from "./contracts";
-export { ACP_CLIENT_VERSION } from "./version";
+// ── Version ──
+export { ACP_CLIENT_VERSION } from './version'
 
-// ── 核心客户端与会话 ──
-export * from "./client/acp-client";
-export * from "./client/sdk-client";
-export * from "./client/session-open";
-export * from "./client/client-handlers";
-export * from "./client/acp-proxy-service";
-export * from "./client/acp-paths";
-export * from "./client/acp-fs";
-export * from "./client/acp-terminal";
+// ── Domain (pure, zero Node I/O) ──
+export * from './domain/contracts'
+export * from './domain/auth/auth-method-order'
+export * from './domain/auth/connect-auth-decision'
+export * from './domain/auth/connect-auth-gate'
+export * from './domain/session/available-commands'
+export * from './domain/session/code-mode'
+export * from './domain/session/compat-guide'
+export * from './domain/session/config-options'
+export * from './domain/session/permission'
+export * from './domain/session/quota'
+export * from './domain/session/session-capabilities'
+export * from './domain/transport/config-text'
+export * from './domain/transport/connection-health'
+export * from './domain/transport/terminal-output-buffer'
 
-// ── 进程管理 ──
-export * from "./process/process-manager";
+// ── Ports ──
+export * from './ports'
 
-// ── Agent 运行时矩阵 ──
-export * from "./runtimes";
+// ── Application (pure orchestration) ──
+export * from './application'
 
-// ── 应用资源目录（单目录接口：读取/摘要/合并/资格门） ──
-export * from "./resources/app-resources";
-export * from "./resources/config-text";
-export * from "./resources/eligibility";
+// ── Driving Adapters (SDK facade) ──
+export * from './adapters/driving/sdk/acp-client'
 
-// ── 传输 ──
-export * from "./transport/terminal-output-buffer";
+// ── Composition Root ──
+export * from './bootstrap/default-ports'
 
-// ── 认证协议通用门限 ──
-export * from "./auth/auth-method-order";
-export * from "./auth/connect-auth-decision";
-export * from "./auth/connect-auth-gate";
-
-// ── 会话 ──
-export * from "./session/agent-registry";
-export * from "./session/code-mode";
-export * from "./session/config-options";
-export * from "./session/session-capabilities";
-export * from "./session/available-commands";
-
-export * from "./session/quota";
-
-export * from "./resources/runtime-bindings";
-
-export * from "./resources/session-config";
-
-// ── MCP ──
-export * from "./client/mcp-session-recovery";
-export * from "./mcp/connection-health";
+// ── Driven Adapters (Node / SDK / Resources / Runtime Plugins) ──
+export * from './adapters/driven/transport/sdk-client'
+export * from './adapters/driven/transport/client-handlers'
+export * from './adapters/driven/process/process-manager'
+export * from './adapters/driven/host/acp-fs'
+export * from './adapters/driven/host/acp-paths'
+export * from './adapters/driven/host/acp-proxy-service'
+export * from './adapters/driven/host/acp-terminal'
+export * from './adapters/driven/resources/app-resources'
+export * from './adapters/driven/resources/app-skills-mcp'
+export * from './adapters/driven/resources/resource-provisioner'
+export * from './adapters/driven/resources/runtime-bindings'
+export * from './adapters/driven/resources/session-config'
+export * from './adapters/driven/runtimes'

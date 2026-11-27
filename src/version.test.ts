@@ -8,7 +8,7 @@ describe('ACP_CLIENT_VERSION', () => {
     expect(ACP_CLIENT_VERSION).toBe(pkg.version)
   })
   it('sidecar reports it instead of a hardcoded string', () => {
-    const src = readFileSync(new URL('./sidecar/main.ts', import.meta.url), 'utf8')
+    const src = readFileSync(new URL('./adapters/driving/sidecar/main.ts', import.meta.url), 'utf8')
     expect(src).toMatch(/sendNotification\('ready', \{\s*version: ACP_CLIENT_VERSION,/)
   })
 })

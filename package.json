@@ -1,6 +1,6 @@
 {
   "name": "@yitom/acp-client",
-  "version": "0.1.16",
+  "version": "0.2.0",
   "description": "Headless ACP (Agent Client Protocol) SDK for connecting to Codex, Claude, Cursor, DeepSeek and more",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -31,11 +31,11 @@
   },
   "homepage": "https://github.com/yitom486/acp-client#readme",
   "scripts": {
-    "build": "node scripts/sync-version.mjs && bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && bun build ./src/mcp/app-skills-mcp-serve.ts --outfile ./dist/app-skills-mcp-serve.cjs --format cjs --target node && bun build ./src/sidecar/main.ts --outfile ./dist/sidecar.cjs --format cjs --target node && tsc -p tsconfig.json",
+    "build": "node scripts/sync-version.mjs && bun build ./src/index.ts --outdir ./dist --format esm --target node --external @agentclientprotocol/sdk && bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs --target node --external @agentclientprotocol/sdk && bun build ./src/adapters/driven/resources/app-skills-mcp-serve.ts --outfile ./dist/app-skills-mcp-serve.cjs --format cjs --target node && bun build ./src/adapters/driving/sidecar/main.ts --outfile ./dist/sidecar.cjs --format cjs --target node && tsc -p tsconfig.json",
     "test": "vitest run",
     "prepublishOnly": "bun run build",
     "version": "node scripts/sync-version.mjs && git add src/version.ts",
-    "test:mcp": "vitest run src/client/mcp-session-recovery.test.ts src/client/acp-client-mcp.test.ts"
+    "test:mcp": "vitest run src/application/mcp-session-recovery.test.ts src/adapters/driving/sdk/acp-client-mcp.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.9.1"

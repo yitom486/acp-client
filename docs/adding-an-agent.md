@@ -1,128 +1,156 @@
-# 新增 Agent 运行时适配器指南 (Adding an Agent)
+# 新增 Agent 运行时插件指南 (Adding an Agent)
 
-`@yitom/acp-client` 采用插件化适配器（Adapter Pattern）架构。如果你想接入一个新的 Agent 运行时，**只需要在一个地方新增适配器文件并注册**，所有调用该 SDK 的项目（CLI、Electron、Tauri、Web 等）即可全局自动支持该 Agent！
+`@yitom/acp-client` 采用**六边形架构（Hexagonal Architecture / Ports & Adapters）**。每个 ACP 运行时都是一个自包含的 **`AcpRuntimePlugin`**（出站驱动插件），集中声明其启动模板、认证预检、命令行探测、应用资源布局与可选额度探针。
+
+新增一个内置运行时只需要 **新建 1 个插件文件 + 在注册表加 1 行**；或者外部宿主无需修改 SDK 源码，直接把自定义插件传入 `new AcpClient({ runtime: myPlugin })` 或独立的 `createRuntimeRegistry()` 即可使用。
 
 ---
 
-## 适配器接口规范
+## 插件契约：`AcpRuntimePlugin`
 
-所有运行时适配器必须实现 `GenericRuntimeAdapter` 接口：
+所有运行时插件实现 [src/ports/runtime-plugin.ts](../src/ports/runtime-plugin.ts) 中定义的 `AcpRuntimePlugin`：
 
 ```typescript
-export interface GenericRuntimeAdapter {
-  /** 唯一运行时标识，如 'my-agent' */
-  id: string
+export interface AcpRuntimePlugin {
+  /** 唯一运行时标识，如 'ollama-acp' */
+  readonly id: string
+  /** 静态描述与默认启动命令模板 */
+  readonly manifest: AcpRuntimeInfo
+  /** 可选别名（例如 cursor -> cursor-cli） */
+  readonly aliases?: readonly string[]
 
-  /** 凭证存在性探测（判断用户是否已在本机登录或配置了 Key） */
-  probeAuth: () => CodexAuthPreflight
-
-  /**
-   * [可选] 启动前 CLI 命令探测：
-   * 返回实际执行的 { command, args }，若返回 null 表示未安装，提前提示安装指引
-   */
-  resolveSpawnCommand?: () => { command: string; args: string[] } | null
-
-  /**
-   * [可选] 启动前预检拦截：
-   * 返回非空字符串表示拦截并提示用户（例如缺少必要环境变量时阻止 spawn）
-   */
-  resolveSpawnBlocker?: () => string | null | undefined
-
-  /** [可选] 环境变量定制 */
-  getSpawnEnv?: (proxySettings?: Partial<AcpProxySettings>) => {
-    env: NodeJS.ProcessEnv
-    envRemove: string[]
+  /** [可选] 认证预检与门闩策略（缺省则按标准 ACP 流程处理） */
+  readonly auth?: {
+    probeAuth?: () => AcpAuthPreflight
+    orderAuthMethods?: (methods: AcpAuthMethod[]) => AcpAuthMethod[]
+    canSkipInteractiveAuth?: (methodId: string, force?: boolean) => boolean
+    tryDirectSessionFirst?: boolean
   }
 
-  /** [可选] 认证方式重新排序 */
-  orderAuthMethods?: (methods: AcpAuthMethod[]) => AcpAuthMethod[]
+  /** [可选] 启动前命令解析、缺 Key 判停与环境定制 */
+  readonly spawn?: {
+    resolveCommand?: () => { command: string; args: string[] } | null
+    resolveBlocker?: () => string | null | undefined
+    getSpawnEnv?: (proxySettings?: Partial<AcpProxySettings>) => RuntimeEnvOverrides
+    beforeSpawn?: () => Promise<void>
+    onColdStart?: () => Promise<void>
+  }
 
-  /** [可选] 是否尝试直接建立会话（针对把 Token 保存在系统 Keychain 的 CLI） */
-  tryDirectSessionFirst?: boolean
+  /** [可选] 应用资源策略、桥版本白名单与会话级隔离配置布局 */
+  readonly resources?: {
+    capability: AppResourceCapability
+    supportedBridgeVersions?: readonly string[]
+    prepareOverlay?: (input: RuntimeResourcePrepInput) => Promise<AppResourcePrep>
+    sessionMeta?: (directory: string) => Record<string, unknown> | undefined
+    sessionConfigLayout?: SessionConfigLayoutSpec
+  }
+
+  /** [可选] 官方额度探针（无官方接口请省略或返回 null） */
+  readonly quota?: {
+    probeQuota: (options?: { sessionId?: string }) => Promise<AcpAgentQuota | null>
+  }
 }
 ```
 
 ---
 
-## 步骤教学：以接入 `ollama-acp` 为例
+## 方式一：外部宿主零修改直接接入自定义运行时（推荐）
 
-### 步骤 1：新建适配器目录与文件
-
-在 `packages/acp/src/runtimes/` 下新建目录 `ollama/index.ts`：
+无需 fork 或修改 `@yitom/acp-client`，直接构造一个 `AcpRuntimePlugin`：
 
 ```typescript
-// packages/acp/src/runtimes/ollama/index.ts
-import type { CodexAuthPreflight } from '@yitom/acp-client'
-import type { GenericRuntimeAdapter } from '../index'
+import {
+  AcpClient,
+  createBuiltinRuntimeRegistry,
+  emptyAcpAuthPreflight,
+  type AcpRuntimePlugin,
+} from '@yitom/acp-client'
 
-export function probeOllamaAuth(): CodexAuthPreflight {
-  // 检查本机是否已运行 Ollama 服务或配置了 OLLAMA_HOST
-  const hasHostEnv = Boolean(process.env.OLLAMA_HOST?.trim())
-  return {
-    hasCodexHome: false,
-    hasAuthFile: false,
-    hasApiKeyEnv: hasHostEnv,
-    looksLoggedIn: true, // 本地开源模型通常无需登录
-  }
+const ollamaPlugin: AcpRuntimePlugin = {
+  id: 'ollama-acp',
+  aliases: ['ollama'],
+  manifest: {
+    id: 'ollama-acp',
+    name: 'Ollama',
+    description: '本地 Ollama ACP 服务',
+    command: 'ollama-acp',
+    args: ['--stdio'],
+    requiredEnvKeys: [],
+    authHint: '本地模型，无需登录',
+  },
+  auth: {
+    probeAuth: () => ({ ...emptyAcpAuthPreflight(), looksLoggedIn: true }),
+  },
 }
 
-export const ollamaAdapter: GenericRuntimeAdapter = {
+// 用法 A：直接传入单个客户端
+const client = new AcpClient({
+  runtime: ollamaPlugin,
+  workspaceRoot: process.cwd(),
+})
+
+// 用法 B：创建独立注册表实例（不污染全局状态），供多个客户端共享
+const registry = createBuiltinRuntimeRegistry([ollamaPlugin])
+const client2 = new AcpClient({
+  runtime: 'ollama', // 支持别名解析
+  runtimeRegistry: registry,
+  workspaceRoot: process.cwd(),
+})
+```
+
+---
+
+## 方式二：向 SDK 内置列表贡献新运行时（仅 2 步）
+
+### 步骤 1：新建插件目录与文件
+
+在 `src/adapters/driven/runtimes/<name>/index.ts` 新建自包含插件（禁止跨运行时互相 import；共用平台工具放 `runtimes/_shared/`）：
+
+```typescript
+// src/adapters/driven/runtimes/ollama/index.ts
+import { emptyAcpAuthPreflight } from '../../../../domain/contracts'
+import type { AcpRuntimePlugin } from '../../../../ports'
+import { prepareCompatibilityResources } from '../../resources/runtime-bindings'
+
+export const ollamaRuntimePlugin: AcpRuntimePlugin = {
   id: 'ollama-acp',
-  probeAuth: () => probeOllamaAuth(),
-  resolveSpawnBlocker: () => {
-    // 检查服务是否存活，或者放行
-    return null
+  manifest: {
+    id: 'ollama-acp',
+    name: 'Ollama',
+    description: '启动本机 Ollama ACP 服务',
+    authHint: '本地开源模型，无需登录',
+    command: 'ollama-acp',
+    args: ['--stdio'],
+    requiredEnvKeys: [],
+  },
+  auth: {
+    probeAuth: () => ({ ...emptyAcpAuthPreflight(), looksLoggedIn: true }),
+  },
+  resources: {
+    capability: { entry: null, strategy: 'compatibility', configHome: null },
+    prepareOverlay: async ({ directory }) =>
+      prepareCompatibilityResources(directory, 'runtime-not-supported'),
   },
 }
 ```
 
-### 步骤 2：在适配器矩阵中注册
+### 步骤 2：注册到 `BUILTIN_RUNTIME_PLUGINS`
 
-打开 `packages/acp/src/runtimes/index.ts`，导出并加入工厂分发：
+在 [src/adapters/driven/runtimes/registry.ts](../src/adapters/driven/runtimes/registry.ts) 的 `BUILTIN_RUNTIME_PLUGINS` 数组中加入 `ollamaRuntimePlugin`（并在 `runtimes/index.ts` 导出）。
 
-```typescript
-import { ollamaAdapter } from './ollama'
+`BUILTIN_ACP_RUNTIMES`、`APP_RESOURCE_CAPABILITIES`、`NATIVE_ELIGIBLE_BRIDGE_VERSIONS` 与会话级隔离配置都会**自动从插件声明派生**，不需要再同步修改其他文件。
 
-export * from './ollama'
+### 步骤 3：运行测试与架构边界检查
 
-export function getAcpRuntimeAdapter(runtimeId: string): AcpRuntimeAdapter {
-  switch (runtimeId) {
-    // ... 原有适配器
-    case ollamaAdapter.id:
-      return ollamaAdapter
-    default:
-      return { id: runtimeId, probeAuth: emptyAcpAuthPreflight }
-  }
-}
-```
-
-### 步骤 3：验证与测试
-
-编写对应的单元测试 `ollama/index.test.ts`：
-
-```typescript
-import { describe, expect, it } from 'vitest'
-import { getAcpRuntimeAdapter } from '../index'
-
-describe('ollama runtime adapter', () => {
-  it('正确派发 ollama 适配器', () => {
-    const adapter = getAcpRuntimeAdapter('ollama-acp')
-    expect(adapter.id).toBe('ollama-acp')
-    expect(adapter.probeAuth().looksLoggedIn).toBe(true)
-  })
-})
-```
-
-运行测试：
 ```bash
-bunx vitest run packages/acp/src/runtimes/ollama/index.test.ts
+bun run test
 ```
 
-完成！此后任何项目使用 `new AcpClient({ runtime: 'ollama-acp', ... })` 即可开箱即用。
+`src/architecture-boundaries.test.ts` 会自动校验六边形层级依赖与插件间零耦合。
 
 ---
 
-## 声明 code mode（PTC）支持
+## 声明 Code Mode（PTC）支持
 
 如果运行时能切换“工具呈现方式”（模型改写成代码、以 `tools.<name>()` 调用工具），在 `initialize` 的 `agentCapabilities._meta` 里声明可用值：
 
@@ -130,6 +158,4 @@ bunx vitest run packages/acp/src/runtimes/ollama/index.test.ts
 { "_meta": { "toolsMode": { "values": ["native", "ptc"] } } }
 ```
 
-并在 `session/new`、`session/resume` 读取 `params._meta.toolsMode`（`"native"` 为默认，`"ptc"` 表示 code mode）。要让 code mode 覆盖 MCP 工具，把会话挂载的 MCP 工具注册进同一个工具目录，再统一渲染成 SDK 声明——`@yitom/acp-client` 的 `supportsCodeMode` / `mergeSessionMeta` 会按声明协商，不需要改运行时 id。
-
-没有声明的运行时不会被请求 code mode，`createSession({ codeMode: 'on' })` 对它们是无操作。
+并在 `session/new`、`session/resume` 读取 `params._meta.toolsMode`（`"native"` 为默认，`"ptc"` 表示 code mode）。`@yitom/acp-client` 的 `supportsCodeMode` / `mergeSessionMeta` 会按声明协商，不需要硬编码运行时 id。

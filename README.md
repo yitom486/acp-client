@@ -21,8 +21,8 @@
 
 - **多 Agent 统一适配（10 大内置运行时）**：
   开箱即用支持 `codex-acp` (ChatGPT)、`claude`、`cursor-cli`、`deepseek`、`gemini`、`copilot`、`opencode`、`opencode-v2`、`antigravity-cli`、`agy`。新增 Agent 只需在该包实现一个适配器，全局所有项目自动生效。
-- **纯 Node.js / Headless 架构**：
-  不依赖任何 Electron API、React 或特定前端框架。配置目录跨平台自动检测回落（支持自定义 `dataDir`）。
+- **纯 Node.js / 六边形架构（Ports & Adapters）**：
+  不依赖任何 Electron API、React 或特定前端框架。核心编排（`src/domain/`、`src/ports/`、`src/application/`）完全零 Node I/O、零协议 SDK 耦合，由 `src/architecture-boundaries.test.ts` 自动化守卫边界；支持通过 `AcpRuntimePlugin` 与独立 `createRuntimeRegistry()` 零侵入接入自定义 Agent。
 - **生命周期全托管**：
   负责跨平台后台进程拉起（Windows PID 级联杀进程）、Stdio ndJson 传输桥接、协议初始化（Initialize 握手）、温进程池长驻复用、错误诊断（stderr 尾部日志聚合）。
 - **会话状态机与容错**：
@@ -144,9 +144,9 @@ bun run examples/standalone-acp-demo.ts
 
 应用资源跨运行时验收：OpenCode 1.18.35 已通过真实 ACP + 本地 mock 模型 + 技能 MCP 两轮链路，复跑脚本为 `scripts/smoke-opencode-resources.mjs`；2.0.6 完整链路仍待验，详见 `docs/api-reference.md` 支持矩阵。
 
-原生资源策略见 `src/resources/runtime-bindings.ts` / `docs/api-reference.md §5`：OpenCode 1.18.35 已验证原生 system 规则、native skill 和 MCP；Claude 0.91.0 已接官方原生会话扩展（仅源码契约+mock 验收）；其余运行时明确兼容，不自动迁移认证 HOME。
+原生资源策略见 `src/adapters/driven/resources/runtime-bindings.ts` / `docs/api-reference.md §5`：OpenCode 1.18.35 已验证原生 system 规则、native skill 和 MCP；Claude 0.91.0 已接官方原生会话扩展（仅源码契约+mock 验收）；其余运行时明确兼容，不自动迁移认证 HOME。
 
-会话专属配置环境：`resources: { directory, configurationScope: 'session' }`。仅替换子进程原生配置根，生成规则/纯文档技能、断开清理；不复制用户认证。支持范围、Cursor 规则边界及 agy/DeepSeek 的明确拒绝见 `docs/api-reference.md`。实现与测试：`src/resources/session-config.ts` / `session-config.test.ts`。
+会话专属配置环境：`resources: { directory, configurationScope: 'session' }`。仅替换子进程原生配置根，生成规则/纯文档技能、断开清理；不复制用户认证。各运行时通过插件的 `sessionConfigLayout` 声明布局，实现与测试见 `src/adapters/driven/resources/session-config.ts`。
 
 ### Agent 启动方式
 

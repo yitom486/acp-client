@@ -21,12 +21,17 @@ function walkProductionTs(dir: string): string[] {
 const IMPORT_RE =
   /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)/g
 
-function extractSpecifiers(filePath: string): string[] {
-  const source = readFileSync(filePath, 'utf8')
+const DYNAMIC_IMPORT_RE =
+  /\bimport\s*\(\s*('[^'\r\n]+'|"[^"\r\n]+"|\x60(?:(?!\$\{)[^\x60\r\n])+\x60)\s*(?=[,)])/g
+
+function extractSpecifiers(source: string): string[] {
   const specifiers: string[] = []
   for (const match of source.matchAll(IMPORT_RE)) {
     const spec = match[1] ?? match[2]
     if (spec) specifiers.push(spec)
+  }
+  for (const match of source.matchAll(DYNAMIC_IMPORT_RE)) {
+    specifiers.push(match[1].slice(1, -1))
   }
   return specifiers
 }
@@ -54,12 +59,28 @@ function isUnderLayer(target: string, layer: string): boolean {
 describe('Hexagonal architecture dependency boundaries', () => {
   const prodFiles = walkProductionTs(SRC_ROOT)
 
+  it('finds literal dynamic imports alongside static imports', () => {
+    const source = [
+      "import type { AcpRuntimeInfo } from '../domain/contracts'",
+      "await import('node:fs')",
+      'await import (\n  "../adapters/driven/transport/sdk-client",\n)',
+      'await import(`./local-module`)',
+      'await import(`./${runtime}`)',
+    ].join('\n')
+    expect(extractSpecifiers(source)).toEqual([
+      '../domain/contracts',
+      'node:fs',
+      '../adapters/driven/transport/sdk-client',
+      './local-module',
+    ])
+  })
+
   it('src/domain/** is pure: zero Node IO, zero ACP SDK, zero outer layers', () => {
     const violations: string[] = []
     for (const file of prodFiles) {
       const rel = toPosix(relative(SRC_ROOT, file))
       if (!rel.startsWith('domain/')) continue
-      for (const spec of extractSpecifiers(file)) {
+      for (const spec of extractSpecifiers(readFileSync(file, 'utf8'))) {
         const target = resolveLayerPath(file, spec)
         if (FORBIDDEN_CORE_EXTERNALS.some((re) => re.test(spec))) {
           violations.push(`${rel} -> ${spec}`)
@@ -76,7 +97,7 @@ describe('Hexagonal architecture dependency boundaries', () => {
     for (const file of prodFiles) {
       const rel = toPosix(relative(SRC_ROOT, file))
       if (!rel.startsWith('ports/')) continue
-      for (const spec of extractSpecifiers(file)) {
+      for (const spec of extractSpecifiers(readFileSync(file, 'utf8'))) {
         const target = resolveLayerPath(file, spec)
         if (FORBIDDEN_CORE_EXTERNALS.some((re) => re.test(spec))) {
           violations.push(`${rel} -> ${spec}`)
@@ -93,7 +114,7 @@ describe('Hexagonal architecture dependency boundaries', () => {
     for (const file of prodFiles) {
       const rel = toPosix(relative(SRC_ROOT, file))
       if (!rel.startsWith('application/')) continue
-      for (const spec of extractSpecifiers(file)) {
+      for (const spec of extractSpecifiers(readFileSync(file, 'utf8'))) {
         const target = resolveLayerPath(file, spec)
         if (FORBIDDEN_CORE_EXTERNALS.some((re) => re.test(spec))) {
           violations.push(`${rel} -> ${spec}`)
@@ -114,7 +135,7 @@ describe('Hexagonal architecture dependency boundaries', () => {
     for (const file of prodFiles) {
       const rel = toPosix(relative(SRC_ROOT, file))
       if (!rel.startsWith('adapters/driving/')) continue
-      for (const spec of extractSpecifiers(file)) {
+      for (const spec of extractSpecifiers(readFileSync(file, 'utf8'))) {
         const target = resolveLayerPath(file, spec)
         if (target.startsWith('adapters/driven/')) {
           violations.push(`${rel} -> ${target}`)
@@ -132,7 +153,7 @@ describe('Hexagonal architecture dependency boundaries', () => {
       if (!match) continue
       const owner = match[1]
       if (owner === '_shared') continue
-      for (const spec of extractSpecifiers(file)) {
+      for (const spec of extractSpecifiers(readFileSync(file, 'utf8'))) {
         const target = resolveLayerPath(file, spec)
         const targetMatch = target.match(/^adapters\/driven\/runtimes\/([^/]+)(?:\/|$)/)
         if (!targetMatch) continue

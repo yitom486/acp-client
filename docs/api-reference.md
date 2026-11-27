@@ -19,7 +19,8 @@ const client = new AcpClient(options: AcpClientOptions)
 | 字段 | 类型 | 必填 | 说明 |
 | :--- | :--- | :---: | :--- |
 | `workspaceRoot` | `string` | **是** | Agent 工作区根目录（绝对路径） |
-| `runtime` | `string \| AcpRuntimeInfo` | 否 | 运行时标识（如 `'codex-acp'`、`'cursor-cli'`、`'claude'`、`'deepseek'` 等），默认 `'codex-acp'` |
+| `runtime` | `string \| AcpRuntimeInfo \| AcpRuntimePlugin` | 否 | 运行时 ID、显式启动模板或完整插件。默认 ID 为 `'codex-acp'` |
+| `runtimeRegistry` | `ReadonlyRuntimeRegistryPort` | 否 | 用于查找运行时和别名的注册表，默认使用内置注册表 |
 | `clientInfo` | `{ name: string; version?: string }` | 否 | 客户端身份声明，默认 `{ name: 'acp-client', version: ACP_CLIENT_VERSION }` |
 | `dataDir` | `string` | 否 | 本地凭据与配置持久化目录，缺省自动使用操作系统标准应用数据目录 |
 | `proxy` | `Partial<AcpProxySettings>` | 否 | 代理配置 `{ enabled?: boolean; host?: string; port?: number }`（与持久化配置合并并作用于子进程环境） |
@@ -39,12 +40,12 @@ const client = new AcpClient(options: AcpClientOptions)
   - 当前状态值：`'disconnected' | 'connecting' | 'connected' | 'awaiting_auth' | 'error'`
 - `isConnected`: `boolean`
   - 是否已成功建连且持有就绪的 RPC 客户端
-- `agent`: `ClientContext | null`
-  - 底层 `@agentclientprotocol/sdk` 的原生 RPC 上下文，可用于直接发送低级 RPC 请求
+- `agent` 的类型为 `unknown`。连接后返回传输适配器提供的原生上下文或 RPC 端点，断开时返回 `null`。
+- `runtimePlugin` 返回客户端选用的 `AcpRuntimePlugin`。
 
 ### 核心方法
 
-#### `connect(): Promise<Result<{ status: AcpConnectionStatus; init: InitializeResponse }, AppError>>`
+#### `connect(): Promise<Result<{ status: AcpConnectionStatus; init: AgentInitializeResponse }, AppError>>`
 启动 Agent 后台进程、初始化 Stdio 通道并完成 Initialize 握手。
 
 #### `createSession(options?): Promise<Result<AcpSessionHandle, AppError>>`
@@ -130,12 +131,26 @@ export interface AcpClientCallbacks {
 
 ---
 
-## 4. 运行时适配器工具
+## 4. 运行时插件与注册表
 
-- `getAcpRuntimeAdapter(runtimeId: string): AcpRuntimeAdapter`
-  获取指定运行时的适配器对象。
-- `BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[]`
-  获取当前内置支持的所有 Agent 运行时配置元数据列表。
+- `getRuntimePlugin(runtimeId, registry?)` 按 ID 或别名解析插件。未知 ID 会返回通用插件。
+- `getAcpRuntime(runtimeId, registry?)` 查询运行时的启动模板，未知 ID 返回 `undefined`。
+- `createRuntimeRegistry(plugins?)` 创建独立的可注册实例。`createBuiltinRuntimeRegistry(extraPlugins?)` 创建带内置插件的实例。
+- `DEFAULT_RUNTIME_REGISTRY` 提供只读查询。`DEFAULT_RUNTIME_REGISTRY.clone()` 返回可注册的独立副本。
+- `BUILTIN_ACP_RUNTIMES` 列出内置运行时的启动模板。
+
+### 从 0.1.x 迁移
+
+通过内置 ID 构造 `AcpClient` 的调用可以直接沿用。原先使用 `getAcpRuntimeAdapter` 的调用改为 `getRuntimePlugin`，并通过插件的能力对象访问对应方法。
+
+| 0.1.x 适配器 | 0.2.x 插件 |
+| --- | --- |
+| `probeAuth`、`orderAuthMethods` | `auth?.probeAuth`、`auth?.orderAuthMethods` |
+| `resolveSpawnCommand`、`resolveSpawnBlocker` | `spawn?.resolveCommand`、`spawn?.resolveBlocker` |
+| `prepareAppResources`、`appResourceSessionMeta` | `resources?.prepareOverlay`、`resources?.sessionMeta` |
+| `probeQuota` | `quota?.probeQuota` |
+
+单个客户端可以直接把插件传给 `runtime`。多个客户端可以用 `createBuiltinRuntimeRegistry([myPlugin])` 创建注册表并通过 `runtimeRegistry` 注入，再用运行时 ID 或别名选择插件。完整示例见 [新增 Agent 运行时插件](./adding-an-agent.md)。
 
 ---
 

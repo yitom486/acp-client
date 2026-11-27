@@ -5,7 +5,12 @@ import {
   type AppResourceCapability,
   type NativeEligibility,
 } from '../../../domain/contracts'
-import type { AcpRuntimePlugin, ProvisionedSessionConfigHome, RuntimeRegistryPort } from '../../../ports'
+import type {
+  AcpRuntimePlugin,
+  ProvisionedSessionConfigHome,
+  ReadonlyRuntimeRegistryPort,
+  RuntimeRegistryPort,
+} from '../../../ports'
 import { createSessionConfigHomeFromLayout } from '../resources/session-config'
 import { agyRuntimePlugin } from './agy'
 import { antigravityCliRuntimePlugin } from './antigravity-cli'
@@ -156,8 +161,20 @@ export function createBuiltinRuntimeRegistry(
   return registry
 }
 
-/** Default read-only registry snapshot for convenience helpers and default SDK wiring. */
-export const DEFAULT_RUNTIME_REGISTRY: RuntimeRegistryPort = createBuiltinRuntimeRegistry()
+const builtinRegistry = createBuiltinRuntimeRegistry()
+
+/** Read-only access to the default runtime registrations. */
+export const DEFAULT_RUNTIME_REGISTRY: ReadonlyRuntimeRegistryPort = Object.freeze({
+  get: builtinRegistry.get.bind(builtinRegistry),
+  resolve: builtinRegistry.resolve.bind(builtinRegistry),
+  list: builtinRegistry.list.bind(builtinRegistry),
+  listManifests: builtinRegistry.listManifests.bind(builtinRegistry),
+  findManifest: builtinRegistry.findManifest.bind(builtinRegistry),
+  getDefaultManifest: builtinRegistry.getDefaultManifest.bind(builtinRegistry),
+  resolveResourceEligibility: builtinRegistry.resolveResourceEligibility.bind(builtinRegistry),
+  isSupportedBridgeVersion: builtinRegistry.isSupportedBridgeVersion.bind(builtinRegistry),
+  clone: builtinRegistry.clone.bind(builtinRegistry),
+})
 
 /** Built-in runtime manifests derived directly from the registered plugins (single source of truth). */
 export const BUILTIN_ACP_RUNTIMES: readonly AcpRuntimeInfo[] =
@@ -181,20 +198,20 @@ export const NATIVE_ELIGIBLE_BRIDGE_VERSIONS: Readonly<Record<string, readonly s
 
 export function getRuntimePlugin(
   runtimeId: string,
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): AcpRuntimePlugin {
   return registry.resolve(runtimeId)
 }
 
 export function listAcpRuntimes(
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): AcpRuntimeInfo[] {
   return registry.listManifests()
 }
 
 export function getAcpRuntime(
   id: string,
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): AcpRuntimeInfo | undefined {
   return registry.findManifest(id)
 }
@@ -204,14 +221,14 @@ export function findBuiltinAcpRuntime(id: string): AcpRuntimeInfo | undefined {
 }
 
 export function getDefaultAcpRuntime(
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): AcpRuntimeInfo {
   return registry.getDefaultManifest()
 }
 
 export function resolveRuntimeEligibility(
   runtimeId: string,
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): NativeEligibility {
   return registry.resolveResourceEligibility(runtimeId)
 }
@@ -219,7 +236,7 @@ export function resolveRuntimeEligibility(
 export function isSupportedBridgeVersion(
   runtimeId: string,
   version?: string,
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): NativeEligibility {
   return registry.isSupportedBridgeVersion(runtimeId, version)
 }
@@ -227,7 +244,7 @@ export function isSupportedBridgeVersion(
 export async function createSessionConfigHome(
   runtimeId: string,
   resourcesDir: string,
-  registry: RuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
+  registry: ReadonlyRuntimeRegistryPort = DEFAULT_RUNTIME_REGISTRY,
 ): Promise<ProvisionedSessionConfigHome> {
   const plugin = registry.get(runtimeId)
   const layout = plugin?.resources?.sessionConfigLayout

@@ -19,14 +19,14 @@ import type { AcpAvailableCommand } from '../../../domain/session/available-comm
 import type {
   AcpRuntimePlugin,
   AgentInitializeResponse,
-  RuntimeRegistryPort,
+  ReadonlyRuntimeRegistryPort,
 } from '../../../ports'
 
 export type { AcpClientCallbacks, AcpCreateSessionOptions, AcpPromptOptions }
 
 export interface AcpClientOptions extends AcpClientEngineOptions {
   /** Optional isolated runtime registry (defaults to built-in 10 runtimes). */
-  runtimeRegistry?: RuntimeRegistryPort
+  runtimeRegistry?: ReadonlyRuntimeRegistryPort
   /** Optional port overrides for custom host adapters or pure in-memory testing. */
   ports?: Partial<AcpClientEnginePorts>
 }

@@ -55,6 +55,13 @@ describe('RuntimeRegistry & AcpRuntimePlugin architecture', () => {
     expect(extended.get('ollama-acp')?.id).toBe('ollama-acp')
     expect(extended.get('codex-acp')?.id).toBe('codex-acp')
     expect(DEFAULT_RUNTIME_REGISTRY.get('ollama-acp')).toBeUndefined()
+
+    expect(DEFAULT_RUNTIME_REGISTRY).not.toHaveProperty('register')
+    const cloned = DEFAULT_RUNTIME_REGISTRY.clone()
+    cloned.register(ollamaPlugin)
+    expect(cloned.get('ollama')).toBe(ollamaPlugin)
+    expect(cloned.get('cursor')?.id).toBe('cursor-cli')
+    expect(DEFAULT_RUNTIME_REGISTRY.get('ollama')).toBeUndefined()
   })
 
   it('derives all built-in manifests with complete spawn metadata and consistent ids', () => {

@@ -38,7 +38,7 @@ import {
   type ProvisionedSessionConfigHome,
   type ProxySettingsStorePort,
   type ResourceProvisionerPort,
-  type RuntimeRegistryPort,
+  type ReadonlyRuntimeRegistryPort,
   type SdkRequestActivityController,
 } from '../ports'
 import { AcpMcpRecoveryCancelledError, AcpMcpSessionRecovery } from './mcp-session-recovery'
@@ -105,7 +105,7 @@ export interface AcpClientEngineOptions {
 }
 
 export interface AcpClientEnginePorts {
-  runtimeRegistry: RuntimeRegistryPort
+  runtimeRegistry: ReadonlyRuntimeRegistryPort
   transport: AgentTransportPort
   processLauncher: ProcessLauncherPort
   proxyStore: ProxySettingsStorePort

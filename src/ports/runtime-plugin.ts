@@ -93,12 +93,7 @@ export function isAcpRuntimePlugin(value: unknown): value is AcpRuntimePlugin {
   )
 }
 
-/**
- * Isolated runtime registry port. Each registry instance holds its own plugin
- * map so hosts can compose custom runtimes without mutating global singletons.
- */
-export interface RuntimeRegistryPort {
-  register(plugin: AcpRuntimePlugin): RuntimeRegistryPort
+export interface ReadonlyRuntimeRegistryPort {
   get(runtimeId: string): AcpRuntimePlugin | undefined
   resolve(runtimeId: string): AcpRuntimePlugin
   list(): AcpRuntimePlugin[]
@@ -108,4 +103,8 @@ export interface RuntimeRegistryPort {
   resolveResourceEligibility(runtimeId: string): NativeEligibility
   isSupportedBridgeVersion(runtimeId: string, version?: string): NativeEligibility
   clone(): RuntimeRegistryPort
+}
+
+export interface RuntimeRegistryPort extends ReadonlyRuntimeRegistryPort {
+  register(plugin: AcpRuntimePlugin): RuntimeRegistryPort
 }

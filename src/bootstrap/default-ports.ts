@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AcpClientEnginePorts } from '../application'
-import type { RuntimeRegistryPort } from '../ports'
+import type { ReadonlyRuntimeRegistryPort } from '../ports'
 import { ACP_FS_MAX_READ_BYTES, createNodeHostFs } from '../adapters/driven/host/acp-fs'
 import { getDefaultAgentDataDir } from '../adapters/driven/host/acp-paths'
 import { createFsProxySettingsStore } from '../adapters/driven/host/acp-proxy-service'
@@ -15,12 +15,12 @@ import { createSdkTransportAdapter } from '../adapters/driven/transport/sdk-clie
 import { ACP_CLIENT_VERSION } from '../version'
 
 export interface DefaultPortsOptions {
-  runtimeRegistry?: RuntimeRegistryPort
+  runtimeRegistry?: ReadonlyRuntimeRegistryPort
   terminalOutputByteLimit?: number
   overrides?: Partial<AcpClientEnginePorts>
 }
 
-export function getDefaultRuntimeRegistry(): RuntimeRegistryPort {
+export function getDefaultRuntimeRegistry(): ReadonlyRuntimeRegistryPort {
   return DEFAULT_RUNTIME_REGISTRY
 }
 

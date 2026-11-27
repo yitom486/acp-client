@@ -37,7 +37,7 @@ describe('antigravityCliAdapter（官方 agy acp 适配器）', () => {
     expect(antigravityCliAdapter.canSkipInteractiveAuth?.('oauth-personal')).toBe(false)
     expect(typeof antigravityCliAdapter.probeQuota).toBe('function')
     const quota = await antigravityCliAdapter.probeQuota!()
-    expect(quota?.runtimeId).toBe('antigravity-cli')
+    expect(quota).toBeNull()
   })
 
   it('resolveAntigravityCliCommand 探测 PATH 与标准安装目录，缺失时返回 null', () => {

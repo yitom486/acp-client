@@ -1,10 +1,4 @@
-import {
-  INKDOWN_VIRTUAL_RESOURCES,
-  isInkdownVirtualDirPath,
-  parseInkdownVirtualPath,
-  type AcpPermissionOutcome,
-  type InkdownVirtualResource,
-} from "../contracts"
+import type { AcpPermissionOutcome } from "../contracts"
 import { methods, RequestError, type ClientApp } from '@agentclientprotocol/sdk'
 import { acpReadTextFile, acpWriteTextFile } from './acp-fs'
 import type { AcpTerminalManager } from './acp-terminal'
@@ -12,8 +6,6 @@ import type { AcpTerminalManager } from './acp-terminal'
 export interface AcpClientHandlerDeps {
   getWorkspaceRoot: () => string | null
   terminals: AcpTerminalManager
-  /** 读取 Inkdown 虚拟文件：向渲染进程要内存快照，不碰磁盘 */
-  readSnapshot: (resource: InkdownVirtualResource) => Promise<string>
   /**
    * Agent 审批：直接返回 bridge 结果（直返，无待决 Map）。
    * 无 bridge 时由 SDK 层直接 cancelled，禁静默 allow。
@@ -101,23 +93,6 @@ export function registerAcpClientHandlers(app: ClientApp, deps: AcpClientHandler
     deps.onActivity?.(sessionId)
     if (!workspaceRoot || !filePath) {
       throw toInvalidParams('fs/read_text_file 需要 path 与已连接工作区')
-    }
-    const virtualResource = parseInkdownVirtualPath(filePath, workspaceRoot)
-    if (virtualResource) {
-      try {
-        const content = await deps.readSnapshot(virtualResource)
-        console.info('[acp] fs/read_text_file 虚拟快照 ok', {
-          resource: virtualResource,
-          chars: content.length,
-        })
-        return { content }
-      } catch (error) {
-        throw toServerError(error, '读取虚拟快照失败')
-      }
-    }
-
-    if (isInkdownVirtualDirPath(filePath, workspaceRoot)) {
-      throw toInvalidParams(`虚拟目录下可读：${INKDOWN_VIRTUAL_RESOURCES.join('、')}`)
     }
 
     try {

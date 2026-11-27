@@ -1,15 +1,7 @@
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, extname, resolve, sep } from 'node:path'
-import { mkdir } from 'node:fs/promises'
 
 export const ACP_FS_MAX_READ_BYTES = 2 * 1024 * 1024
-
-/** 电子书是压缩包/二进制：按文本读只会得到乱码并烧掉大量 token */
-const BINARY_DOCUMENT_EXTENSIONS = new Set(['.epub', '.mobi', '.azw', '.azw3', '.pdf'])
-
-export function isBinaryDocumentPath(filePath: string): boolean {
-  return BINARY_DOCUMENT_EXTENSIONS.has(extname(filePath).toLowerCase())
-}
 
 export function assertPathInsideWorkspace(filePath: string, workspaceRoot: string): string {
   const root = resolve(workspaceRoot)
@@ -27,12 +19,10 @@ export async function acpReadTextFile(params: {
   line?: number
   limit?: number
   maxReadBytes?: number
+  blockedExtensions?: ReadonlySet<string>
 }): Promise<{ content: string }> {
-  if (isBinaryDocumentPath(params.path)) {
-    throw new Error(
-      `拒绝按文本读取二进制文档/PDF：${params.path}。` +
-        '该格式应由专有解析器读取，请改为向用户索取所需的章节、目录或文本片段。',
-    )
+  if (params.blockedExtensions?.has(extname(params.path).toLowerCase())) {
+    throw new Error(`拒绝按文本读取受限扩展名文件：${params.path}`)
   }
   const abs = assertPathInsideWorkspace(params.path, params.workspaceRoot)
   await access(abs)

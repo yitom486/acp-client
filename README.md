@@ -156,7 +156,7 @@ Codex、Claude 和 DeepSeek 的启动命令会解析各自发布包的 `latest`�
 
 ### Antigravity CLI
 
-Use `new AcpClient({ runtime: 'antigravity-cli', workspaceRoot })` to start Google's `agy acp` (auto-resolved from `PATH` or `~/.local/bin/agy`, and `%LOCALAPPDATA%\antigravity\agy.exe` / `%USERPROFILE%\.local\bin\agy.exe` on Windows). If the host needs extra flags or a custom path, pass a runtime object with an explicit `command` and `args` (explicit custom runtimes are never overwritten by `resolveSpawnCommand`). Also supports `session.getQuota()` / `probeAgyQuota({ runtimeId: 'antigravity-cli' })`. The sidecar accepts the same runtime ID in `client/connect`.
+Use `new AcpClient({ runtime: 'antigravity-cli', workspaceRoot })` to start Google's `agy acp` (auto-resolved from `PATH` or `~/.local/bin/agy`, and `%LOCALAPPDATA%\antigravity\agy.exe` / `%USERPROFILE%\.local\bin\agy.exe` on Windows). If the host needs extra flags or a custom path, pass a runtime object with an explicit `command` and `args` (explicit custom runtimes are never overwritten by `resolveSpawnCommand`). The `probeQuota` / `session.getQuota()` interface is reserved and currently returns `null` until Google exposes official quota reporting in `agy acp` (passive `RESOURCE_EXHAUSTED` signals from `session/update` are still captured by `QuotaCache`). The sidecar accepts the same runtime ID in `client/connect`.
 
 For session-supplied HTTP MCP servers, include `--process-per-session` in the runtime arguments.
 

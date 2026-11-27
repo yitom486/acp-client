@@ -1,6 +1,6 @@
 /**
  * 示例：在任何其他项目中（无需 Electron，纯命令行/Node.js 环境）
- * 直接引入并使用 @inkdown/acp SDK 连接各类 ACP Agent！
+ * 直接引入并使用 @yitom/acp-client SDK 连接各类 ACP Agent！
  * 
  * 运行方式：
  *   bun run packages/acp/examples/standalone-acp-demo.ts

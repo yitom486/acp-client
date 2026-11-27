@@ -123,9 +123,6 @@ export interface AcpClientCallbacks {
   /** Agent 进程 stderr 输出（用于实时调试排错） */
   onStderrLine?: (line: string) => void
 
-  /** 虚拟文件读取（供 Agent 读取内存快照） */
-  readSnapshot?: (resource: InkdownVirtualResource) => Promise<string>
-
   /** 日志打印 */
   onLog?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
 }

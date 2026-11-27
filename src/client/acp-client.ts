@@ -23,7 +23,6 @@ import type {
   AcpSessionRestoreMethod,
   AppError,
   CodexAuthPreflight,
-  InkdownVirtualResource,
 } from "../contracts"
 import { DEFAULT_ACP_RUNTIME_ID, err, ok, type Result } from "../contracts"
 import { findBuiltinAcpRuntime } from "../contracts"
@@ -69,8 +68,6 @@ export interface AcpClientCallbacks {
   onStatusChange?: (status: AcpConnectionStatus, detail?: string) => void
   /** Agent 进程 stderr 输出行（供排错与诊断） */
   onStderrLine?: (line: string) => void
-  /** 虚拟文件读取（默认不支持，除非宿主提供） */
-  readSnapshot?: (resource: InkdownVirtualResource) => Promise<string>
   /** 日志打印 */
   onLog?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
 }
@@ -532,12 +529,6 @@ export class AcpClient {
       const handlerDeps: AcpClientHandlerDeps = {
         getWorkspaceRoot: () => this.workspaceRoot,
         terminals: this.terminals,
-        readSnapshot: async (resource) => {
-          if (!this.callbacks.readSnapshot) {
-            throw new Error(`当前宿主未实现 readSnapshot 回调: ${resource}`)
-          }
-          return this.callbacks.readSnapshot(resource)
-        },
         onPermission: async (payload) => {
           const callback = this.callbacks.onPermissionRequest
           const cancelled = { outcome: 'cancelled' } as const

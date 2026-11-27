@@ -4,10 +4,10 @@ import { parseRateLimitsFromStatusText, QuotaCache } from './quota'
 describe('quota-parser', () => {
   it('parses real Codex /status screenshot text correctly', () => {
     const text = `Model: gpt-6.1-sol[high]
-Directory: D:\\project\\js\\Electron\\inkdown
+Directory: /workspace/demo
 Approval: on-request
 Sandbox: workspace-write
-Account: ChatGPT plus (yitom486@gmail.com)
+Account: ChatGPT plus (user@example.com)
 Session: 01a1297c-673d-7693-8273-6ab523d87af4
 
 Token usage: 44.0M total (2.3M input + 41.5M cached input, 224.1K output)
@@ -20,7 +20,7 @@ codex Credits: 126.1931995000`
     expect(result).not.toBeNull()
     expect(result?.runtimeId).toBe('codex-acp')
     expect(result?.account?.plan).toBe('ChatGPT plus')
-    expect(result?.account?.email).toBe('yitom486@gmail.com')
+    expect(result?.account?.email).toBe('user@example.com')
 
     expect(result?.primaryWindow?.label).toBe('5h limit')
     expect(result?.primaryWindow?.percentLeft).toBe(99)

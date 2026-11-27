@@ -17,8 +17,10 @@ describe('runtimes quota probes', () => {
     expect(quota?.runtimeId).toBe('codex-acp')
     expect(quota?.provider).toContain('Codex')
     if (quota?.status === 'ok') {
-      expect(quota.account?.plan).toBe('ChatGPT plus')
-      expect(quota.account?.email).toBe('yitom486@gmail.com')
+      expect(quota.account).toBeDefined()
+      if (quota.account?.email) {
+        expect(typeof quota.account.email).toBe('string')
+      }
     }
   }, 15000)
 
@@ -39,34 +41,23 @@ describe('runtimes quota probes', () => {
     expect(['ok', 'unauthorized']).toContain(quota?.status)
   }, 15000)
 
-  it('cursorAdapter provides probeQuota', async () => {
+  it('cursorAdapter keeps probeQuota interface and returns null until official quota exists', async () => {
     expect(typeof cursorAdapter.probeQuota).toBe('function')
     const quota = await cursorAdapter.probeQuota!()
-    expect(quota).not.toBeNull()
-    expect(quota?.runtimeId).toBe('cursor-cli')
-    expect(['ok', 'unauthorized']).toContain(quota?.status)
-  }, 15000)
+    expect(quota).toBeNull()
+  })
 
-  it('agyAdapter provides probeQuota', async () => {
+  it('agyAdapter keeps probeQuota interface and returns null until official ACP quota exists', async () => {
     expect(typeof agyAdapter.probeQuota).toBe('function')
     const quota = await agyAdapter.probeQuota!()
-    expect(quota).not.toBeNull()
-    expect(quota?.runtimeId).toBe('agy')
-    expect(quota?.provider).toContain('Antigravity')
-    expect(['ok', 'unauthorized']).toContain(quota?.status)
-    if (quota?.status === 'ok') {
-      expect(quota.primaryWindow).toBeDefined()
-      expect(quota.credits?.unlimited).toBe(true)
-    }
-  }, 15000)
+    expect(quota).toBeNull()
+  })
 
-  it('antigravityCliAdapter provides probeQuota with runtimeId=antigravity-cli', async () => {
+  it('antigravityCliAdapter keeps probeQuota interface and returns null until official ACP quota exists', async () => {
     expect(typeof antigravityCliAdapter.probeQuota).toBe('function')
     const quota = await antigravityCliAdapter.probeQuota!()
-    expect(quota).not.toBeNull()
-    expect(quota?.runtimeId).toBe('antigravity-cli')
-    expect(['ok', 'unauthorized']).toContain(quota?.status)
-  }, 15000)
+    expect(quota).toBeNull()
+  })
 
   it('AcpClient integrates quota methods', async () => {
     const client = new AcpClient({ workspaceRoot: process.cwd() })

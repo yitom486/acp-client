@@ -124,7 +124,7 @@ export function spawnAcpProcess(options: SpawnAcpOptions): SpawnedAcpProcess {
 
   // 默认允许本机浏览器 OAuth（对齐 VS Code/Zed）；无头/CI 才禁用
   const forceNoBrowser =
-    process.env.INKDOWN_ACP_NO_BROWSER === '1' ||
+    process.env.ACP_NO_BROWSER === '1' ||
     process.env.CI === 'true' ||
     process.env.CI === '1'
   if (forceNoBrowser) {

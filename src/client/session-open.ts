@@ -11,7 +11,7 @@ export interface RestoreOrCreateSessionInput {
   resumeSessionId: string | null
   resumeSupported: boolean
   loadSupported: boolean
-  /** 客户端自带的 MCP server（Inkdown 工具）；Agent 不支持 HTTP 传输时传空数组 */
+  /** 客户端自带的 MCP server；Agent 不支持 HTTP 传输时传空数组 */
   mcpServers?: unknown[]
   /** Default true: never silently remove tools after a failed session/new. */
   preserveMcpOnRetry?: boolean

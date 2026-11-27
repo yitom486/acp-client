@@ -6,11 +6,7 @@ import type { AcpAuthMethod, CodexAuthPreflight } from '../../contracts'
 import type { GenericRuntimeAdapter } from '../index'
 import { probeAgyQuota } from './quota'
 
-export {
-  probeAgyQuota,
-  resolveAntigravityAccount,
-  resolveAntigravityLanguageServer,
-} from './quota'
+export { probeAgyQuota } from './quota'
 
 export interface AntigravityCliPathOverrides {
   platform?: NodeJS.Platform

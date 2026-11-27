@@ -6,7 +6,7 @@
  * - process: 跨平台子进程生命周期、级联 kill 与温进程池复用
  * - client: 独立的 AcpClient 客户端、会话状态机、stdio 桥接与通用回调
  * - auth: 统一认证守门员、密钥探测与 CODEX_HOME 隔离
- * - mcp: 内置与外挂 MCP 工具表定义与 RPC 注册
+ * - mcp: 通用只读技能 MCP 兜底服务与连接健康监测
  * - session: 运行时配置、能力协商与会话注册表
  * - transport: stdio 缓冲与终端输出处理
  */
@@ -51,16 +51,12 @@ export * from "./session/config-options";
 export * from "./session/session-capabilities";
 export * from "./session/available-commands";
 
-// ── MCP ──
-export * from "./mcp/inkdown-mcp-tools";
-export * from "./mcp/inkdown-mcp-toc-tools";
-export * from "./mcp/inkdown-mcp-rpc";
-
 export * from "./session/quota";
 
 export * from "./resources/runtime-bindings";
 
 export * from "./resources/session-config";
 
+// ── MCP ──
 export * from "./client/mcp-session-recovery";
 export * from "./mcp/connection-health";
